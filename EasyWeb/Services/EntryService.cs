@@ -1,11 +1,13 @@
-﻿using System.Diagnostics;
+﻿using System.Data;
 using System.Security.Cryptography;
-using System.Xml.Linq;
+using System.Web;
 using EasyWeb.Data;
+using EasyWeb.Models;
 using NewLife;
 using NewLife.Caching;
 using NewLife.Http;
 using NewLife.Log;
+using NewLife.Security;
 
 namespace EasyWeb.Services;
 
@@ -45,6 +47,94 @@ public class EntryService
 
         return _cacheProvider.Cache.GetOrAdd($"Entry:{storageId}:{path}",
             k => FileEntry.FindByStorageIdAndPath(storageId, path), CacheTime);
+    }
+
+    public FileModel BuildModel(FileEntry entry, Boolean useVip, Boolean isHttps)
+    {
+        if (entry == null) return null;
+
+        // 构建下载Url
+        var url = entry.Path;
+        if (url.IsNullOrEmpty()) url = $"{entry.Parent?.Path}/{entry.Name}";
+        url = url?.Split('/').Select(e => HttpUtility.UrlEncode(e)).Join("/").EnsureStart("/");
+
+        if (useVip && !entry.IsDirectory) url = GetAuthUrl(entry.Storage, url);
+
+        // 如果是Https请求，则生成配套的https地址
+        if (!entry.IsDirectory && isHttps)
+        {
+            if (url.StartsWithIgnoreCase("http://"))
+                url = "https://" + url[7..];
+        }
+
+        return new FileModel
+        {
+            Name = entry.Name,
+            Path = entry.Path,
+            ParentPath = entry.Parent?.Path,
+            Title = entry.Title,
+            Size = entry.Size,
+            LastWrite = entry.LastWrite,
+            IsDirectory = entry.IsDirectory,
+            Hash = entry.Hash,
+            Url = url,
+        };
+    }
+
+    public String GetAuthUrl(FileStorage storage, String url)
+    {
+        if (storage == null || url.IsNullOrEmpty()) return url;
+
+        if (!storage.VipKey.IsNullOrEmpty())
+        {
+            // http://DomainName/Filename?auth_key={<timestamp>-rand-uid-<md5hash>}
+            var path = url;
+            var p = path.IndexOf("://");
+            if (p > 0)
+            {
+                var p2 = path.IndexOf('/', p + 3);
+                if (p2 > 0)
+                    path = path[p2..];
+                else
+                    path = "/";
+            }
+            else if (path[0] != '/')
+            {
+                path = "/" + path;
+            }
+
+            var time = DateTime.UtcNow.ToInt();
+            var rand = Rand.Next(100_000, 1_000_000);
+            var hash = $"{path}-{time}-{rand}-0-{storage.VipKey}".MD5().ToLower();
+            var key = $"{time}-{rand}-0-{hash}";
+
+            url += url.Contains("?") ? "&" : "?";
+            url += "auth_key=" + key;
+        }
+
+        if (!storage.VipUrl.IsNullOrEmpty())
+        {
+            //var uri = new UriInfo(url);
+            //var uri2 = new UriInfo(storage.VipUrl)
+            //{
+            //    PathAndQuery = uri.PathAndQuery
+            //};
+            //url = uri.ToString();
+
+            var p = url.IndexOf("://");
+            if (p > 0)
+            {
+                var p2 = url.IndexOf('/', p + 3);
+                if (p2 > 0)
+                    url = url[p2..];
+                else
+                    url = "/";
+            }
+
+            url = storage.VipUrl.TrimEnd("/") + url;
+        }
+
+        return url;
     }
 
     /// <summary>获取文件，增加访问量。可能指向真实文件</summary>
@@ -113,6 +203,8 @@ public class EntryService
         var url = entry.RawUrl;
         if (url.IsNullOrEmpty()) return false;
 
+        using var span = _tracer?.NewSpan(nameof(DownloadAsync), new { entry.Name, path, url });
+
         XTrace.WriteLine("文件不存在，准备下载 {0} => {1}", url, path);
 
         var client = new HttpClient();
@@ -138,6 +230,13 @@ public class EntryService
         entry.Size = fi.Length;
         entry.LastAccess = DateTime.Now;
         entry.Update();
+
+        var parent = entry.Parent;
+        if (parent != null)
+        {
+            parent.Size = FileEntry.FindAllByParentId(parent.Id).Sum(e => e.Size);
+            parent.Update();
+        }
 
         return true;
     }
@@ -230,7 +329,7 @@ public class EntryService
     public void FixVersionAndTag(FileEntry entry)
     {
         var name = entry.Name;
-        if (name.IsNullOrEmpty() || !Version.TryParse(name, out _) && !name.Contains("net") && !name.Contains("runtime")) return;
+        if (name.IsNullOrEmpty() || !Version.TryParse(name, out _) && !name.Contains("net") && !name.Contains("runtime") && !name.Contains("-preview")) return;
 
         name = name.TrimEnd(".tar.gz", ".zip", ".exe", ".pkg");
 
@@ -253,14 +352,21 @@ public class EntryService
 
     String GetVersion(String name)
     {
-        // 	aspnetcore-runtime-composite-9.0.0-preview.4.24267.6-linux-musl-arm64.tar.gz
+        // aspnetcore-runtime-composite-9.0.0-preview.4.24267.6-linux-musl-arm64.tar.gz
 
         if (name.Contains('-'))
         {
             var p = name.LastIndexOf("-win");
             if (p < 0) p = name.LastIndexOf("-linux");
             if (p < 0) p = name.LastIndexOf("-osx");
-            if (p < 0) return null;
+            if (p < 0)
+            {
+                // 9.0.0-preview.5
+                p = name.LastIndexOf("-preview");
+                if (p > 0) return name.Replace("-preview", null);
+
+                return null;
+            }
 
             name = name[..p];
         }
@@ -273,5 +379,94 @@ public class EntryService
         }
 
         return null;
+    }
+
+    public FileInfo GetFile(FileEntry entry)
+    {
+        var path = entry.FullName;
+        if (entry.Storage != null) path = entry.Storage.HomeDirectory.CombinePath(path);
+
+        path = path.GetFullPath();
+
+        return path.AsFile();
+    }
+
+    public DirectoryInfo GetDirectory(FileEntry entry)
+    {
+        var path = entry.FullName;
+        if (entry.Storage != null) path = entry.Storage.HomeDirectory.CombinePath(path);
+
+        path = path.GetFullPath();
+
+        return path.AsDirectory();
+    }
+
+    /// <summary>清理无效条目（含子目录）的文件，含禁用和原始跳转</summary>
+    /// <param name="entry"></param>
+    /// <param name="force">是否强迫删除，主要用于子目录递归</param>
+    /// <returns></returns>
+    public Int32 ClearFiles(FileEntry entry, Boolean force)
+    {
+        var rs = 0;
+        if (entry.IsDirectory)
+        {
+            force |= !entry.Enable || entry.RedirectMode == RedirectModes.Redirect;
+
+            var childs = FileEntry.FindAllByParentId(entry.Id);
+            foreach (var item in childs)
+            {
+                rs += ClearFiles(item, force);
+            }
+
+            entry.Size = childs.Sum(e => e.Size);
+            entry.Update();
+
+            // 删除空目录
+            var di = GetDirectory(entry);
+            if (di.Exists && !di.GetFiles().Any()) di.Delete(true);
+        }
+        else if (force || !entry.Enable || entry.RedirectMode == RedirectModes.Redirect)
+        {
+            var fi = GetFile(entry);
+            if (fi.Exists)
+            {
+                using var span = _tracer?.NewSpan("DeleteFile", new { entry.Name, entry.Path, entry.FullName, entry.Enable, entry.RedirectMode });
+
+                fi.Delete();
+
+                rs++;
+            }
+
+            entry.Size = 0;
+            entry.Update();
+        }
+
+        return rs;
+    }
+
+    public Boolean ValidLimit(FileEntry entry, String ip, Int32 limitCycle = 600, Int64 maxSize = 100 * 1024 * 1024)
+    {
+        // 时间因子，今天总秒数除以周期
+        var now = DateTime.Now;
+        var sec = (Int32)(now - now.Date).TotalSeconds;
+        var time = sec / limitCycle;
+
+        // 根据流量大小做限制
+        var key = $"flow:{ip}:{time}";
+        var size = _cacheProvider.Cache.Increment(key, entry.Size);
+        if (size <= entry.Size)
+            _cacheProvider.Cache.SetExpire(key, TimeSpan.FromSeconds(limitCycle));
+
+        DefaultSpan.Current?.AppendTag($"ValidLimit: time={TimeSpan.FromSeconds(time * limitCycle)} size={size}");
+
+        // 避免第一个文件都无法下载
+        if (size - entry.Size > maxSize)
+        {
+            _tracer?.NewError("access:FlowLimit", new { entry.Path, entry.Size, TotalSize = size });
+
+            return false;
+        }
+
+        return true;
     }
 }

@@ -1,0 +1,38 @@
+﻿@using EasyWeb.Models
+@using NewLife.Common;
+@using NewLife.Cube
+@{
+    var set = ViewBag.PageSetting as PageSetting ?? PageSetting.Global;
+    var page = ViewBag.Page as Pager;
+}
+@if (set.EnableSelect && this.Has(PermissionFlags.Update))
+{
+    //todo redirectMode用下拉时，data-fields取不到值，暂时用文本框
+    var list = new List<SelectListItem>();
+    foreach (var item in EnumHelper.GetDescriptions(typeof(RedirectModes)))
+    {
+        var si = new SelectListItem
+                    {
+                        Text = item.Value,
+                        Value = item.Key + "",
+                        Selected = item.Key == page["redirectMode"].ToInt()
+                    };
+        list.Add(si);
+    }
+    <div class="form-group">
+        <label for="redirectMode" class="control-label">跳转模式：</label>
+        @Html.ForDropDownList("redirectMode", EnumHelper.GetDescriptions(typeof(RedirectModes)), page["redirectMode"], "全部", false)
+    </div>
+    <button type="button" class="btn btn-purple btn-sm" data-action="action" data-url="@Url.Action("SetRawRedirect")" data-fields="keys,redirectMode" disabled>
+        设置原始跳
+    </button>
+    <button type="button" class="btn btn-purple btn-sm" data-action="action" data-url="@Url.Action("ClearFiles")" data-fields="keys" disabled title="清理无效条目（含子目录）的文件，含禁用和原始跳转">
+        清理文件
+    </button>
+    <button type="button" class="btn btn-purple btn-sm" data-action="action" data-url="@Url.Action("EnableSelect")" data-fields="keys" disabled>
+        批量启用
+    </button>
+    <button type="button" class="btn btn-purple btn-sm" data-action="action" data-url="@Url.Action("DisableSelect")" data-fields="keys" disabled>
+        批量禁用
+    </button>
+}

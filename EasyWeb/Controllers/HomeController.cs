@@ -1,4 +1,5 @@
-﻿using System.Web;
+﻿using System.Net;
+using System.Web;
 using EasyWeb.Models;
 using EasyWeb.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -57,7 +58,7 @@ public class HomeController : ControllerBaseX
                                .ThenByDescending(e => !e.Tag.IsNullOrEmpty())
                                .ThenBy(e => e.Tag + "")
                                .ThenByDescending(e => e.Version)
-                               .ThenByDescending(e => e.LastWrite)
+                               //.ThenByDescending(e => e.LastWrite)
                                .ThenBy(e => e.Name).ToList(),
         };
 
@@ -71,11 +72,23 @@ public class HomeController : ControllerBaseX
         //    .ThenByDescending(e => e.LastWrite)
         //    .ThenBy(e => e.Name).ToList();
 
-        var model = new DirectoryModel
+        var cdnIp = Request.Headers["Ali-Cdn-Real-Ip"] + "";
+        var isCdn = !cdnIp.IsNullOrEmpty();
+        var isHttps = Request.IsHttps;
+
+        var model = new DirectoryModel();
+
+        var ps = new List<FileModel>();
+        var pt = parent;
+        while (pt != null)
         {
-            Parent = parent,
-            Entries = entris,
-        };
+            ps.Add(_entryService.BuildModel(pt, !isCdn, isHttps));
+            pt = pt.Parent;
+        }
+        ps.Add(new FileModel { Path = "" });
+        model.Parents = ps;
+
+        model.Entries = entris.Select(e => _entryService.BuildModel(e, !isCdn, isHttps)).ToList();
 
         if (parent != null)
             ViewBag.Title = parent.Path;
@@ -96,6 +109,8 @@ public class HomeController : ControllerBaseX
 
         var (entry, link) = _entryService.RetrieveFile(0, pathInfo);
         if (entry == null || !entry.Enable) return NotFound("未找到文件清单");
+
+        using var span = _tracer?.NewSpan(nameof(DownloadFile), new { entry.Name, entry.Path, entry.FullName });
 
         // 链接跳转到目标
         if (link != null && entry.LinkRedirect)
@@ -122,6 +137,33 @@ public class HomeController : ControllerBaseX
             }
         }
 
+        // 直接跳转到原始地址
+        var mode = entry?.RedirectMode;
+        if (mode == null || mode == RedirectModes.None) mode = entry.Parent?.RedirectMode;
+        if (mode == null || mode == RedirectModes.None) mode = entry.Storage?.RedirectMode;
+        if (mode == RedirectModes.Smart)
+        {
+            // 智能跳转。验证通过的不需要跳转
+            var auth_key = Request.Query["auth_key"] + "";
+            if (auth_key.IsNullOrEmpty()) mode = RedirectModes.Redirect;
+        }
+
+        var url = entry.RawUrl;
+        if (!url.IsNullOrEmpty() && mode != null && mode == RedirectModes.Redirect)
+        {
+            // 是否需要修改协议
+            if (entry.Source != null && !entry.Source.Protocol.IsNullOrEmpty())
+            {
+                var p = url.IndexOf("://");
+                if (p > 0)
+                {
+                    url = entry.Source.Protocol + url[p..];
+                }
+            }
+
+            return Redirect(url);
+        }
+
         // 如果文件不存在，则临时下载，或者返回404
         if (!System.IO.File.Exists(path))
         {
@@ -136,6 +178,12 @@ public class HomeController : ControllerBaseX
 
                 return NotFound($"下载异常!id={fe.Id}/{fe.Name}");
             }
+        }
+
+        // 根据流量大小做限制
+        if (!_entryService.ValidLimit(entry, UserHost, 600, 100 * 1024 * 1024))
+        {
+            return Problem("流量超限", null, (Int32?)HttpStatusCode.TooManyRequests, "Title", "Type");
         }
 
         // 文件下载使用原始访问的名字和时间

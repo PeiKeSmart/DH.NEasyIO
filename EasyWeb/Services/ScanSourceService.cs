@@ -1,6 +1,4 @@
-﻿
-using System.Security.Cryptography;
-using EasyWeb.Data;
+﻿using EasyWeb.Data;
 using EasyWeb.Models;
 using NewLife;
 using NewLife.Log;
@@ -36,7 +34,7 @@ public class ScanSourceService : IHostedService
         return Task.CompletedTask;
     }
 
-    void DoScan(Object state)
+    async Task DoScan(Object state)
     {
         using var span = _tracer?.NewSpan("ScanSource");
 
@@ -51,7 +49,7 @@ public class ScanSourceService : IHostedService
             if (item.LastScan.AddSeconds(period) < DateTime.Now)
             {
                 if (item.Kind.EqualIgnoreCase("dotNet"))
-                    ScanDotNet(item).Wait();
+                    await ScanDotNet(item);
 
                 item.LastScan = DateTime.Now;
 
@@ -79,15 +77,19 @@ public class ScanSourceService : IHostedService
         {
             root = new FileEntry
             {
-                SourceId = source.Id,
-                StorageId = sid,
+                //SourceId = source.Id,
+                //StorageId = sid,
                 Name = "dotNet",
                 Path = "dotNet",
                 Enable = true,
                 IsDirectory = true,
             };
-            root.Insert();
+            //root.Insert();
         }
+
+        root.StorageId = sid;
+        root.SourceId = source.Id;
+        root.Save();
 
         try
         {
@@ -128,13 +130,13 @@ public class ScanSourceService : IHostedService
                     var url = rel["release-notes"] + "";
                     try
                     {
-                        fe ??= new FileEntry { Name = ver };
-                        fe.SourceId = root.Id;
+                        fe ??= new FileEntry { Name = ver, Enable = true };
+                        fe.SourceId = root.SourceId;
                         fe.StorageId = root.StorageId;
                         fe.ParentId = root.Id;
                         fe.Path = $"{root.Path}/{ver}";
                         fe.IsDirectory = true;
-                        fe.Enable = true;
+                        //fe.Enable = true;
                         fe.RawUrl = url;
                         fe.LastWrite = rel["release-date"].ToDateTime();
 
@@ -194,9 +196,9 @@ public class ScanSourceService : IHostedService
             if (fe != null)
                 childs.Remove(fe);
             else
-                fe = new FileEntry { Name = name };
+                fe = new FileEntry { Name = name, Enable = true };
 
-            fe.SourceId = parent.Id;
+            fe.SourceId = parent.SourceId;
             fe.StorageId = parent.StorageId;
             fe.ParentId = parent.Id;
 
@@ -204,7 +206,7 @@ public class ScanSourceService : IHostedService
             fe.Path = $"{parent.Path}/{name}";
             fe.RawUrl = item.Url;
             fe.Hash = item.Hash;
-            fe.Enable = true;
+            //fe.Enable = true;
             fe.Remark = item.Rid;
 
             // 解析版本号
@@ -276,14 +278,14 @@ public class ScanSourceService : IHostedService
                     var name = tag + ext;
 
                     var fe = childs.FirstOrDefault(e => e.Name.EqualIgnoreCase(name));
-                    fe ??= new FileEntry { Name = name };
+                    fe ??= new FileEntry { Name = name, Enable = true };
 
                     fe.StorageId = root.StorageId;
                     fe.ParentId = root.Id;
                     fe.Name = name;
                     fe.Tag = tag;
                     fe.Path = $"{root.Path}/{name}";
-                    fe.Enable = true;
+                    //fe.Enable = true;
                     fe.IsDirectory = false;
 
                     fe.LinkTarget = $"{root.Name}/!*-*/{k}-*-{r}{ext}";
