@@ -19,7 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DH.NCube.Core" Version="3.7.2024.828-beta0243" />
+    <PackageReference Include="DH.NCube.Core" Version="3.7.2024.902-beta0137" />
   </ItemGroup>
 
   <ItemGroup>
