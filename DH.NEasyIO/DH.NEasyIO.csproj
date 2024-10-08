@@ -44,7 +44,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="DH.NCore" Version="3.91.2024.1008-beta0138" />
+    <PackageReference Include="DH.NCore" Version="3.91.2024.1008-beta0713" />
     <PackageReference Include="DH.NStardust.Extensions" Version="3.91.2024.1008-beta0339" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0">
       <PrivateAssets>all</PrivateAssets>
