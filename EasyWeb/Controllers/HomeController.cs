@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Web;
+using EasyWeb;
 using EasyWeb.Models;
 using EasyWeb.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -14,12 +15,14 @@ namespace NewLife.EasyWeb.Controllers;
 public class HomeController : ControllerBaseX
 {
     private readonly EntryService _entryService;
+    private readonly EasyFileSetting _easyFileSetting;
     private readonly ICacheProvider _cacheProvider;
     private readonly ITracer _tracer;
 
-    public HomeController(EntryService entryService, ICacheProvider cacheProvider, ITracer tracer)
+    public HomeController(EntryService entryService, EasyFileSetting easyFileSetting, ICacheProvider cacheProvider, ITracer tracer)
     {
         _entryService = entryService;
+        _easyFileSetting = easyFileSetting;
         _cacheProvider = cacheProvider;
         _tracer = tracer;
         PageSetting.EnableNavbar = false;
@@ -28,6 +31,12 @@ public class HomeController : ControllerBaseX
     /// <summary>主页面</summary>
     /// <returns></returns>
     public ActionResult Index() => ShowDir(null);
+
+    public ActionResult Robot()
+    {
+        var txt = "User-agent: *\r\nDisallow: /\r\n";
+        return Content(txt, "text/plain");
+    }
 
     /// <summary>显示目录</summary>
     /// <param name="pathInfo"></param>
@@ -110,7 +119,7 @@ public class HomeController : ControllerBaseX
         var (entry, link) = _entryService.RetrieveFile(0, pathInfo);
         if (entry == null || !entry.Enable) return NotFound("未找到文件清单");
 
-        using var span = _tracer?.NewSpan(nameof(DownloadFile), new { entry.Name, entry.Path, entry.FullName });
+        using var span = _tracer?.NewSpan("GetFile", new { pathInfo, entry.Name, entry.Path, entry.FullName }, entry.Size);
 
         // 链接跳转到目标
         if (link != null && entry.LinkRedirect)
@@ -164,6 +173,14 @@ public class HomeController : ControllerBaseX
             return Redirect(url);
         }
 
+        // 根据流量大小做限制
+        var set = _easyFileSetting;
+        if (set.LimitCycle > 0 && set.FlowLimitByIP > 0 &&
+            !_entryService.ValidLimit(entry, UserHost, set.LimitCycle, set.FlowLimitByIP * 1024 * 1024))
+        {
+            return Problem("流量超限", null, (Int32?)HttpStatusCode.TooManyRequests, "Title", "Type");
+        }
+
         // 如果文件不存在，则临时下载，或者返回404
         if (!System.IO.File.Exists(path))
         {
@@ -178,12 +195,6 @@ public class HomeController : ControllerBaseX
 
                 return NotFound($"下载异常!id={fe.Id}/{fe.Name}");
             }
-        }
-
-        // 根据流量大小做限制
-        if (!_entryService.ValidLimit(entry, UserHost, 600, 100 * 1024 * 1024))
-        {
-            return Problem("流量超限", null, (Int32?)HttpStatusCode.TooManyRequests, "Title", "Type");
         }
 
         // 文件下载使用原始访问的名字和时间
