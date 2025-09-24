@@ -1,25 +1,25 @@
 ﻿using System;
+
 using NewLife.Log;
 
-namespace Test
+namespace Test;
+
+class Program
 {
-    class Program
+    static void Main(String[] args)
     {
-        static void Main(String[] args)
+        XTrace.UseConsole();
+
+        try
         {
-            XTrace.UseConsole();
-
-            try
-            {
-                //Test1();
-            }
-            catch (Exception ex)
-            {
-                XTrace.WriteException(ex);
-            }
-
-            Console.WriteLine("OK!");
-            Console.ReadKey();
+            //Test1();
         }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+        }
+
+        Console.WriteLine("OK!");
+        Console.ReadKey();
     }
 }

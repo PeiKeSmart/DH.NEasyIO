@@ -1,5 +1,6 @@
 ﻿using EasyWeb.Data;
 using EasyWeb.Services;
+
 using Xunit;
 
 namespace XUnitTest;

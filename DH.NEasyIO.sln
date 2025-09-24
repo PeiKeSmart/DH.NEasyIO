@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.32112.339
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11018.127 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Test", "Test\Test.csproj", "{582E00A2-4FA4-41DC-84AD-EE264A9FF4D8}"
 EndProject
@@ -19,8 +19,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DH.NEasyIO", "DH.NEasyIO\DH.NEasyIO.csproj", "{CC0B8977-F646-4211-BC1F-CD2BCA28971D}"
-EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DH.NEasyWeb", "DH.NEasyWeb\DH.NEasyWeb.csproj", "{5DFD2466-B27F-4C51-AE6A-7B159CB779F1}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyWeb", "EasyWeb\EasyWeb.csproj", "{1F52D021-B55C-489C-B206-077A535E35AD}"
 EndProject
@@ -42,10 +40,6 @@ Global
 		{CC0B8977-F646-4211-BC1F-CD2BCA28971D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CC0B8977-F646-4211-BC1F-CD2BCA28971D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CC0B8977-F646-4211-BC1F-CD2BCA28971D}.Release|Any CPU.Build.0 = Release|Any CPU
-		{5DFD2466-B27F-4C51-AE6A-7B159CB779F1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{5DFD2466-B27F-4C51-AE6A-7B159CB779F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{5DFD2466-B27F-4C51-AE6A-7B159CB779F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{5DFD2466-B27F-4C51-AE6A-7B159CB779F1}.Release|Any CPU.Build.0 = Release|Any CPU
 		{1F52D021-B55C-489C-B206-077A535E35AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{1F52D021-B55C-489C-B206-077A535E35AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1F52D021-B55C-489C-B206-077A535E35AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
