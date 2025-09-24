@@ -5,8 +5,8 @@
     <AssemblyTitle>文件管理</AssemblyTitle>
     <Description>文件管理系统</Description>
     <Company>湖北登灏科技有限公司</Company>
-    <Copyright>©2020-2024 湖北登灏科技有限公司</Copyright>
-    <VersionPrefix>1.0</VersionPrefix>
+    <Copyright>©2020-2025 湖北登灏科技有限公司</Copyright>
+    <VersionPrefix>4.13</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
