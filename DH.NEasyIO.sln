@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.0.11109.219 d18.0-oob
+VisualStudioVersion = 18.0.11109.219
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Test", "Test\Test.csproj", "{582E00A2-4FA4-41DC-84AD-EE264A9FF4D8}"
 EndProject
@@ -22,6 +22,8 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DH.NEasyIO", "DH.NEasyIO\DH.NEasyIO.csproj", "{CC0B8977-F646-4211-BC1F-CD2BCA28971D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyWeb", "EasyWeb\EasyWeb.csproj", "{1F52D021-B55C-489C-B206-077A535E35AD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pek.EasyIO", "Pek.EasyIO\Pek.EasyIO.csproj", "{7A637570-A785-4DA0-A4CB-43E86CC2463D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +47,10 @@ Global
 		{1F52D021-B55C-489C-B206-077A535E35AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1F52D021-B55C-489C-B206-077A535E35AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1F52D021-B55C-489C-B206-077A535E35AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7A637570-A785-4DA0-A4CB-43E86CC2463D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7A637570-A785-4DA0-A4CB-43E86CC2463D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7A637570-A785-4DA0-A4CB-43E86CC2463D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7A637570-A785-4DA0-A4CB-43E86CC2463D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
