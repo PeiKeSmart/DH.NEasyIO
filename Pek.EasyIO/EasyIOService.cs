@@ -2,6 +2,8 @@
 
 using NewLife.Log;
 
+using Pek.EasyIO.Options;
+
 namespace Pek.EasyIO;
 
 /// <summary>EasyIO服务</summary>
