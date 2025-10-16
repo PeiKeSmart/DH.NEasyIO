@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <AssemblyTitle>EasyIO简易文件存储</AssemblyTitle>
     <Description>EasyIO简单文件存储，支持分布式系统中文件集中存储</Description>
     <Company>湖北登灏科技有限公司</Company>
@@ -50,6 +50,8 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Pek.AspNetCore" Version="4.14.2025.1004-beta0521" />
+    <PackageReference Include="Pek.NCubeUI" Version="4.14.2025.1004-beta0530" />
   </ItemGroup>
 
   <ItemGroup>
