@@ -3,6 +3,7 @@
 using NewLife;
 
 using Pek.EasyIO.Options;
+using Pek.Models;
 using Pek.MVC;
 using Pek.NCube.BaseControllers;
 using Pek.Swagger;
@@ -23,8 +24,6 @@ public class IOController : ApiControllerBaseX
 
     private String GetPath(String id)
     {
-        if (id.IsNullOrEmpty()) throw new ArgumentNullException(nameof(id));
-
         var set = _storageOptions;
         if (set.Path.IsNullOrEmpty()) throw new Exception("未配置存储信息");
 
@@ -32,13 +31,19 @@ public class IOController : ApiControllerBaseX
     }
 
     /// <summary>上传文件对象</summary>
-    /// <param name="id"></param>
+    /// <param name="id">文件名称。可包含路径</param>
     /// <returns></returns>
-    /// <exception cref="ArgumentNullException"></exception>
     [HttpPut]
     public async Task<Object> Put(String id)
     {
-        if (id.IsNullOrEmpty()) throw new ArgumentNullException(nameof(id));
+        var result = new DGResult();
+
+        if (id.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = GetResource("参数不能为空");
+            return result;
+        }
 
         var fileName = GetPath(id);
 
