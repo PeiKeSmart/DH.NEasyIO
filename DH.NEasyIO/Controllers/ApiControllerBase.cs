@@ -125,11 +125,15 @@ public class ApiControllerBase : ControllerBase, IActionFilter
         //data.ToJson(false, true, true);
         var writer = new JsonWriter
         {
-            Indented = false,
-            IgnoreNullValues = false,
-            CamelCase = true,
-            Int64AsString = true
+            //Indented = false,
+            //IgnoreNullValues = false,
+            //CamelCase = true,
+            //Int64AsString = true
         };
+        writer.Options.Int64AsString = true;
+        writer.Options.WriteIndented = false;
+        writer.Options.IgnoreNullValues = false;
+        writer.Options.CamelCase = true;
 
         writer.Write(data);
 

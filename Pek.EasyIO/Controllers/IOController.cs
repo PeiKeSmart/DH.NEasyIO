@@ -3,12 +3,12 @@
 using NewLife;
 
 using Pek.EasyIO.Options;
-using Pek.NCube;
+using Pek.NCube.BaseControllers;
 
 namespace Pek.EasyIO.Controllers;
 
 /// <summary>文件控制器</summary>
-public class IOController : PekBaseControllerX
+public class IOController : ApiControllerBaseX
 {
     private readonly FileStorageOptions _storageOptions;
 
