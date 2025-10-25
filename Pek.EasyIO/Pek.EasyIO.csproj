@@ -44,14 +44,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="DH.NCore" Version="4.15.2025.1002-beta0240" />
-    <PackageReference Include="DH.NStardust.Extensions" Version="4.15.2025.1002-beta0334" />
+    <PackageReference Include="DH.NCore" Version="4.15.2025.1024-beta1228" />
+    <PackageReference Include="DH.NStardust.Extensions" Version="4.15.2025.1024-beta1328" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Pek.AspNetCore" Version="4.14.2025.1004-beta0521" />
-    <PackageReference Include="Pek.NCubeUI" Version="4.14.2025.1004-beta0530" />
+    <PackageReference Include="Pek.NCubeUI" Version="4.14.2025.1016-beta0919" />
   </ItemGroup>
 
   <ItemGroup>
