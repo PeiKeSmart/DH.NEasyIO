@@ -5,7 +5,6 @@ using NewLife;
 using Pek.EasyIO.Options;
 using Pek.Models;
 using Pek.MVC;
-using Pek.NCube.BaseControllers;
 using Pek.Swagger;
 
 namespace Pek.EasyIO.Controllers;
@@ -14,7 +13,7 @@ namespace Pek.EasyIO.Controllers;
 [Produces("application/json")]
 [CustomRoute(ApiVersions.V1)]
 //[Authorize("jwt")]
-public class IOController : ApiControllerBaseX
+public class IOController : ApiControllerBase
 {
     private readonly FileStorageOptions _storageOptions;
 
