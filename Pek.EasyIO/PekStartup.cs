@@ -106,7 +106,7 @@ public partial class PekStartup : IPekStartup
     /// <summary>
     /// 获取此启动配置实现的顺序
     /// </summary>
-    public Int32 StartupOrder => 999; //常见服务应在错误处理程序之后加载
+    public Int32 StartupOrder => 200; //常见服务应在错误处理程序之后加载
 
     /// <summary>
     /// 获取此启动配置实现的顺序。主要针对ConfigureMiddleware、UseRouting前执行的数据、UseAuthentication或者UseAuthorization后面 Endpoints前执行的数据

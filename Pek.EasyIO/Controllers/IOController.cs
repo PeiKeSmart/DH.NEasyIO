@@ -2,7 +2,6 @@
 
 using NewLife;
 
-using Pek.EasyIO.Options;
 using Pek.Models;
 using Pek.MVC;
 using Pek.Swagger;
@@ -15,18 +14,9 @@ namespace Pek.EasyIO.Controllers;
 //[Authorize("jwt")]
 public class IOController : ApiControllerBase
 {
-    private readonly FileStorageOptions _storageOptions;
-
-    /// <summary>实例化</summary>
-    /// <param name="storageOptions"></param>
-    public IOController(FileStorageOptions storageOptions) => _storageOptions = storageOptions;
-
     private String GetPath(String id)
     {
-        var set = _storageOptions;
-        if (set.Path.IsNullOrEmpty()) throw new Exception("未配置存储信息");
-
-        return set.Path.CombinePath(id).GetFullPath();
+        return EasyIOSetting.Current.Path.CombinePath(id).GetFullPath();
     }
 
     /// <summary>上传文件对象</summary>
@@ -151,10 +141,10 @@ public class IOController : ApiControllerBase
             }
         }
 
-        var di = _storageOptions.Path.CombinePath(dir).AsDirectory();
+        var di = EasyIOSetting.Current.Path.CombinePath(dir).AsDirectory();
         if (!di.Exists) return null;
 
-        var root = _storageOptions.Path.EnsureEnd("/").GetFullPath();
+        var root = EasyIOSetting.Current.Path.EnsureEnd("/").GetFullPath();
         var rs = new List<Object>();
 
         // 子目录列表
