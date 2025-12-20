@@ -28,7 +28,7 @@ public class ApiControllerBase : ApiControllerBaseX, IActionFilter
         // 访问令牌
         var request = context.HttpContext.Request;
         var token = request.Query["Token"] + "";
-        if (token.IsNullOrEmpty()) token = (request.Headers["Authorization"] + "").TrimStart("Bearer ");
+        if (token.IsNullOrEmpty()) token = (request.Headers.Authorization + "").TrimStart("Bearer ");
         if (token.IsNullOrEmpty()) token = request.Headers["X-Token"] + "";
         if (token.IsNullOrEmpty()) token = request.Cookies["Token"] + "";
         Token = token;
