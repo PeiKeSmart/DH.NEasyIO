@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<EntityModel xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:schemaLocation="https://newlifex.com https://newlifex.com/Model202407.xsd" Version="11.3.2023.0307" Document="https://newlifex.com/xcode/model" xmlns="https://newlifex.com/Model202407.xsd">
+<EntityModel xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:schemaLocation="https://newlifex.com https://newlifex.com/Model202509.xsd" Version="11.3.2023.0307" Document="https://newlifex.com/xcode/model" xmlns="https://newlifex.com/Model202509.xsd">
   <Option>
     <!--类名模板。其中{name}替换为Table.Name，如{name}Model/I{name}Dto等-->
     <ClassNameTemplate />
@@ -9,6 +9,8 @@
     <BaseClass>DHEntityBase</BaseClass>
     <!--命名空间-->
     <Namespace>HlktechFileStorage.Entity</Namespace>
+    <!--引用命名空间-->
+    <ExtendNameSpace />
     <!--输出目录-->
     <Output>.\</Output>
     <!--是否使用中文文件名。默认false-->
@@ -39,13 +41,154 @@
     <CubeOutput />
   </Option>
   <Tables>
-    <Table Name="SingleArticleLan" TableName="DH_SingleArticleLan" Description="单页文章翻译" IgnoreNameCase="False">
+    <Table Name="FileEntry" Description="文件条目">
       <Columns>
-        <Column Name="Id" DataType="Int64" PrimaryKey="True" Description="编号" />
-        
+        <Column Name="Id" DataType="Int64" Identity="True" PrimaryKey="True" Description="编号" />
+        <Column Name="Name" DataType="String" Master="True" Length="200" Nullable="False" Description="文件名" />
+        <Column Name="OriginalName" DataType="String" Length="200" Description="原始文件名" />
+        <Column Name="Extension" DataType="String" Length="20" Description="扩展名（.jpg）" />
+        <Column Name="ContentType" DataType="String" Length="100" Description="MIME类型（image/jpeg）" />
+        <Column Name="Size" DataType="Int64" Description="文件大小（字节）" Default="0" />
+        <Column Name="Hash" DataType="String" Length="64" Description="文件哈希（MD5/SHA256）" />
+        <Column Name="StorageType" DataType="String" Length="20" Description="存储类型（Local/OSS/S3）" Default="Local" />
+        <Column Name="StoragePath" DataType="String" Length="500" Nullable="False" Description="存储路径" />
+        <Column Name="RelativePath" DataType="String" Length="500" Description="相对路径" />
+        <Column Name="BucketName" DataType="String" Length="100" Description="存储桶名称" />
+        <Column Name="AccessLevel" DataType="Int32" Description="访问级别（1=Public,2=Private,3=Internal）" Default="2" />
+        <Column Name="IsPublic" DataType="Boolean" Description="是否公开" Default="False" />
+        <Column Name="MaxDownloads" DataType="Int32" Description="最大下载次数（0=不限制）" Default="0" />
+        <Column Name="DownloadCount" DataType="Int32" Description="已下载次数" Default="0" />
+        <Column Name="ExpiresAt" DataType="DateTime" Description="过期时间" />
+        <Column Name="ProjectId" DataType="Int64" Description="所属项目ID" Default="0" />
+        <Column Name="ProjectName" DataType="String" Length="100" Description="项目名称（冗余）" />
+        <Column Name="Category" DataType="String" Description="分类（Document/Image/Video等）" />
+        <Column Name="Tags" DataType="String" Length="500" Description="标签（JSON数组或逗号分隔）" />
+        <Column Name="BusinessType" DataType="String" Description="业务类型" />
+        <Column Name="BusinessId" DataType="String" Length="100" Description="业务ID" />
+        <Column Name="OwnerId" DataType="Int64" Description="所有者用户ID" Default="0" />
+        <Column Name="OwnerName" DataType="String" Length="100" Description="所有者名称" />
+        <Column Name="Width" DataType="Int32" Description="图片宽度" Default="0" />
+        <Column Name="Height" DataType="Int32" Description="图片高度" Default="0" />
+        <Column Name="Duration" DataType="Int32" Description="视频/音频时长（秒）" Default="0" />
+        <Column Name="Metadata" DataType="String" Length="2000" Description="其他元数据（JSON）" />
+        <Column Name="Status" DataType="Int32" Description="状态（0=已删除,1=正常,2=处理中,3=已禁用）" Default="1" />
+        <Column Name="IsDeleted" DataType="Boolean" Description="是否已删除" Default="False" />
+        <Column Name="DeletedTime" DataType="DateTime" Description="删除时间" />
+        <Column Name="IsScanned" DataType="Boolean" Description="是否已病毒扫描" Default="False" />
+        <Column Name="IsEncrypted" DataType="Boolean" Description="是否加密存储" Default="False" />
+        <Column Name="EncryptionKey" DataType="String" Length="100" Description="加密密钥ID" />
+        <Column Name="CreateUserId" DataType="Int64" Description="创建者ID" Default="0" />
+        <Column Name="CreateUser" DataType="String" Length="100" Description="创建者" />
+        <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="创建时间" />
+        <Column Name="CreateIP" DataType="String" Description="创建IP" />
+        <Column Name="UpdateUserId" DataType="Int64" Description="更新者ID" Default="0" />
+        <Column Name="UpdateUser" DataType="String" Length="100" Description="更新者" />
+        <Column Name="UpdateTime" DataType="DateTime" Description="更新时间" />
+        <Column Name="UpdateIP" DataType="String" Description="更新IP" />
+        <Column Name="Remark" DataType="String" Length="500" Description="备注说明" />
       </Columns>
       <Indexes>
-        <Index Columns="SId,LId" Unique="True" />
+        <Index Columns="Hash" />
+        <Index Columns="ProjectId,Status" />
+        <Index Columns="AccessLevel,Status" />
+        <Index Columns="CreateTime" />
+        <Index Columns="BusinessType,BusinessId" />
+        <Index Columns="OwnerId,Status" />
+      </Indexes>
+    </Table>
+    <Table Name="FileProject" Description="文件项目">
+      <Columns>
+        <Column Name="Id" DataType="Int64" Identity="True" PrimaryKey="True" Description="编号" />
+        <Column Name="Code" DataType="String" Nullable="False" Description="项目编码（唯一）" />
+        <Column Name="Name" DataType="String" Master="True" Length="100" Nullable="False" Description="项目名称" />
+        <Column Name="Description" DataType="String" Length="500" Description="项目描述" />
+        <Column Name="ApiSecret" DataType="String" Length="100" Description="API密钥" />
+        <Column Name="MaxStorageSize" DataType="Int64" Description="最大存储空间（字节，0=不限制）" Default="0" />
+        <Column Name="UsedStorageSize" DataType="Int64" Description="已用存储空间" Default="0" />
+        <Column Name="MaxFileSize" DataType="Int64" Description="单文件最大大小（字节）" Default="0" />
+        <Column Name="AllowedExtensions" DataType="String" Length="500" Description="允许的扩展名（.jpg,.png）" />
+        <Column Name="ForbiddenExtensions" DataType="String" Length="500" Description="禁止的扩展名" />
+        <Column Name="DefaultAccessLevel" DataType="Int32" Description="默认访问级别" Default="2" />
+        <Column Name="RateLimitPerIp" DataType="Int32" Description="每IP每分钟限制" Default="10" />
+        <Column Name="RateLimitPerFile" DataType="Int32" Description="每文件每分钟限制" Default="20" />
+        <Column Name="Enable" DataType="Boolean" Description="是否启用" Default="True" />
+        <Column Name="Status" DataType="Int32" Description="状态" Default="1" />
+        <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="创建时间" />
+        <Column Name="UpdateTime" DataType="DateTime" Description="更新时间" />
+        <Column Name="Remark" DataType="String" Length="500" Description="备注" />
+      </Columns>
+      <Indexes>
+        <Index Columns="Code" Unique="True" />
+        <Index Columns="Enable,Status" />
+      </Indexes>
+    </Table>
+    <Table Name="DownloadLog" Description="下载日志">
+      <Columns>
+        <Column Name="Id" DataType="Int64" Identity="True" PrimaryKey="True" Description="编号" />
+        <Column Name="FileId" DataType="Int64" Description="文件ID" />
+        <Column Name="FileName" DataType="String" Length="200" Description="文件名（冗余）" />
+        <Column Name="ProjectId" DataType="Int64" Description="项目ID" Default="0" />
+        <Column Name="AccessType" DataType="String" Length="20" Description="访问方式（Direct/Token/Share）" />
+        <Column Name="ShareCode" DataType="String" Length="32" Description="分享码（如果是分享下载）" />
+        <Column Name="UserId" DataType="Int64" Description="用户ID（登录下载）" Default="0" />
+        <Column Name="UserName" DataType="String" Length="100" Description="用户名" />
+        <Column Name="ClientIp" DataType="String" Description="客户端IP" />
+        <Column Name="UserAgent" DataType="String" Length="500" Description="用户代理" />
+        <Column Name="Referer" DataType="String" Length="500" Description="来源地址" />
+        <Column Name="Success" DataType="Boolean" Description="是否成功" Default="True" />
+        <Column Name="FailReason" DataType="String" Length="200" Description="失败原因" />
+        <Column Name="ResponseCode" DataType="Int32" Description="响应状态码" Default="200" />
+        <Column Name="BytesTransferred" DataType="Int64" Description="传输字节数" Default="0" />
+        <Column Name="DownloadTime" DataType="Int32" Description="下载耗时（毫秒）" Default="0" />
+        <Column Name="Speed" DataType="Int64" Description="下载速度（字节/秒）" Default="0" />
+        <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="下载时间" />
+        <Column Name="TraceId" DataType="String" Description="追踪ID" />
+      </Columns>
+      <Indexes>
+        <Index Columns="FileId,CreateTime" />
+        <Index Columns="ClientIp,CreateTime" />
+        <Index Columns="ProjectId,CreateTime" />
+        <Index Columns="UserId,CreateTime" />
+        <Index Columns="CreateTime" />
+      </Indexes>
+    </Table>
+    <Table Name="FileShare" Description="文件分享">
+      <Columns>
+        <Column Name="Id" DataType="Int64" Identity="True" PrimaryKey="True" Description="编号" />
+        <Column Name="FileId" DataType="Int64" Description="文件ID" />
+        <Column Name="FileName" DataType="String" Length="200" Description="文件名（冗余）" />
+        <Column Name="ProjectId" DataType="Int64" Description="项目ID" Default="0" />
+        <Column Name="ShareCode" DataType="String" Length="32" Nullable="False" Description="分享码（唯一短码）" />
+        <Column Name="SharePassword" DataType="String" Length="20" Description="提取码（可选）" />
+        <Column Name="ExpiresAt" DataType="DateTime" Description="过期时间（null=永久）" />
+        <Column Name="MaxDownloads" DataType="Int32" Description="最大下载次数（0=不限制）" Default="0" />
+        <Column Name="DownloadCount" DataType="Int32" Description="已下载次数" Default="0" />
+        <Column Name="MaxViews" DataType="Int32" Description="最大访问次数（0=不限制）" Default="0" />
+        <Column Name="ViewCount" DataType="Int32" Description="已访问次数" Default="0" />
+        <Column Name="AllowedIps" DataType="String" Length="500" Description="允许的IP列表（逗号分隔，支持通配）" />
+        <Column Name="DeniedIps" DataType="String" Length="500" Description="禁止的IP列表" />
+        <Column Name="RequirePassword" DataType="Boolean" Description="是否需要提取码" Default="False" />
+        <Column Name="AllowPreview" DataType="Boolean" Description="是否允许预览" Default="True" />
+        <Column Name="AllowDownload" DataType="Boolean" Description="是否允许下载" Default="True" />
+        <Column Name="ShareUserId" DataType="Int64" Description="分享人ID" Default="0" />
+        <Column Name="ShareUserName" DataType="String" Length="100" Description="分享人姓名" />
+        <Column Name="ShareMessage" DataType="String" Length="500" Description="分享留言" />
+        <Column Name="IsActive" DataType="Boolean" Description="是否激活" Default="True" />
+        <Column Name="Status" DataType="Int32" Description="状态（0=已失效,1=正常,2=已禁用）" Default="1" />
+        <Column Name="RevokedAt" DataType="DateTime" Description="撤销时间" />
+        <Column Name="RevokedReason" DataType="String" Length="200" Description="撤销原因" />
+        <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="创建时间" />
+        <Column Name="CreateIP" DataType="String" Description="创建IP" />
+        <Column Name="UpdateTime" DataType="DateTime" Description="更新时间" />
+        <Column Name="LastAccessTime" DataType="DateTime" Description="最后访问时间" />
+        <Column Name="Remark" DataType="String" Length="500" Description="备注" />
+      </Columns>
+      <Indexes>
+        <Index Columns="ShareCode" Unique="True" />
+        <Index Columns="FileId,IsActive" />
+        <Index Columns="ShareUserId,CreateTime" />
+        <Index Columns="ExpiresAt,IsActive" />
+        <Index Columns="Status" />
       </Indexes>
     </Table>
   </Tables>
