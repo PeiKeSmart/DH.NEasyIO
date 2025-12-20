@@ -41,13 +41,13 @@ public partial class FileProjectModel
     /// <summary>禁止的扩展名</summary>
     public String? ForbiddenExtensions { get; set; }
 
-    /// <summary>默认访问级别</summary>
+    /// <summary>默认访问级别。1公开 2私有 3内部</summary>
     public Int32 DefaultAccessLevel { get; set; }
 
-    /// <summary>每IP每分钟限制</summary>
+    /// <summary>每IP每分钟限制次数</summary>
     public Int32 RateLimitPerIp { get; set; }
 
-    /// <summary>每文件每分钟限制</summary>
+    /// <summary>每文件每分钟限制次数</summary>
     public Int32 RateLimitPerFile { get; set; }
 
     /// <summary>是否启用</summary>

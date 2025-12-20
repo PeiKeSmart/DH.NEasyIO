@@ -104,27 +104,27 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
     public String? ForbiddenExtensions { get => _ForbiddenExtensions; set { if (OnPropertyChanging("ForbiddenExtensions", value)) { _ForbiddenExtensions = value; OnPropertyChanged("ForbiddenExtensions"); } } }
 
     private Int32 _DefaultAccessLevel;
-    /// <summary>默认访问级别</summary>
+    /// <summary>默认访问级别。1公开 2私有 3内部</summary>
     [DisplayName("默认访问级别")]
-    [Description("默认访问级别")]
+    [Description("默认访问级别。1公开 2私有 3内部")]
     [DataObjectField(false, false, false, 0)]
-    [BindColumn("DefaultAccessLevel", "默认访问级别", "")]
+    [BindColumn("DefaultAccessLevel", "默认访问级别。1公开 2私有 3内部", "")]
     public Int32 DefaultAccessLevel { get => _DefaultAccessLevel; set { if (OnPropertyChanging("DefaultAccessLevel", value)) { _DefaultAccessLevel = value; OnPropertyChanged("DefaultAccessLevel"); } } }
 
     private Int32 _RateLimitPerIp;
-    /// <summary>每IP每分钟限制</summary>
-    [DisplayName("每IP每分钟限制")]
-    [Description("每IP每分钟限制")]
+    /// <summary>每IP每分钟限制次数</summary>
+    [DisplayName("每IP每分钟限制次数")]
+    [Description("每IP每分钟限制次数")]
     [DataObjectField(false, false, false, 0)]
-    [BindColumn("RateLimitPerIp", "每IP每分钟限制", "")]
+    [BindColumn("RateLimitPerIp", "每IP每分钟限制次数", "")]
     public Int32 RateLimitPerIp { get => _RateLimitPerIp; set { if (OnPropertyChanging("RateLimitPerIp", value)) { _RateLimitPerIp = value; OnPropertyChanged("RateLimitPerIp"); } } }
 
     private Int32 _RateLimitPerFile;
-    /// <summary>每文件每分钟限制</summary>
-    [DisplayName("每文件每分钟限制")]
-    [Description("每文件每分钟限制")]
+    /// <summary>每文件每分钟限制次数</summary>
+    [DisplayName("每文件每分钟限制次数")]
+    [Description("每文件每分钟限制次数")]
     [DataObjectField(false, false, false, 0)]
-    [BindColumn("RateLimitPerFile", "每文件每分钟限制", "")]
+    [BindColumn("RateLimitPerFile", "每文件每分钟限制次数", "")]
     public Int32 RateLimitPerFile { get => _RateLimitPerFile; set { if (OnPropertyChanging("RateLimitPerFile", value)) { _RateLimitPerFile = value; OnPropertyChanged("RateLimitPerFile"); } } }
 
     private Boolean _Enable;
@@ -329,13 +329,13 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         /// <summary>禁止的扩展名</summary>
         public static readonly Field ForbiddenExtensions = FindByName("ForbiddenExtensions");
 
-        /// <summary>默认访问级别</summary>
+        /// <summary>默认访问级别。1公开 2私有 3内部</summary>
         public static readonly Field DefaultAccessLevel = FindByName("DefaultAccessLevel");
 
-        /// <summary>每IP每分钟限制</summary>
+        /// <summary>每IP每分钟限制次数</summary>
         public static readonly Field RateLimitPerIp = FindByName("RateLimitPerIp");
 
-        /// <summary>每文件每分钟限制</summary>
+        /// <summary>每文件每分钟限制次数</summary>
         public static readonly Field RateLimitPerFile = FindByName("RateLimitPerFile");
 
         /// <summary>是否启用</summary>
@@ -386,13 +386,13 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         /// <summary>禁止的扩展名</summary>
         public const String ForbiddenExtensions = "ForbiddenExtensions";
 
-        /// <summary>默认访问级别</summary>
+        /// <summary>默认访问级别。1公开 2私有 3内部</summary>
         public const String DefaultAccessLevel = "DefaultAccessLevel";
 
-        /// <summary>每IP每分钟限制</summary>
+        /// <summary>每IP每分钟限制次数</summary>
         public const String RateLimitPerIp = "RateLimitPerIp";
 
-        /// <summary>每文件每分钟限制</summary>
+        /// <summary>每文件每分钟限制次数</summary>
         public const String RateLimitPerFile = "RateLimitPerFile";
 
         /// <summary>是否启用</summary>
