@@ -1,25 +1,24 @@
-﻿using HlktechFileStorage.Entity;
+﻿using System.Security.Cryptography;
+
+using HlktechFileStorage.Entity;
 
 using Microsoft.AspNetCore.Mvc;
 
 using NewLife;
 using NewLife.Log;
 
-using HlktechFileStorage.Entity;
-
+using Pek.EasyIO.Auth;
 using Pek.EasyIO.Services;
 using Pek.Models;
 using Pek.MVC;
 using Pek.Swagger;
-
-using System.Security.Cryptography;
 
 namespace Pek.EasyIO.Controllers;
 
 /// <summary>文件控制器</summary>
 [Produces("application/json")]
 [CustomRoute(ApiVersions.V1)]
-//[Authorize("jwt")]
+[ApiAuth] // 启用API鉴权
 public class IOController : ApiControllerBase
 {
     private readonly IFileStorageService _storageService;
@@ -31,14 +30,13 @@ public class IOController : ApiControllerBase
 
     /// <summary>上传文件对象</summary>
     /// <param name="id">文件名称。可包含路径</param>
-    /// <param name="projectCode">项目编码（可选）</param>
     /// <param name="category">文件分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
     /// <param name="isPublic">是否公开（可选）</param>
     /// <returns></returns>
     [HttpPut]
-    public async Task<Object> Put(String id, String projectCode = null, String category = null,
+    public async Task<Object> Put(String id, String category = null,
         String businessType = null, String businessId = null, Boolean isPublic = false)
     {
         var result = new DGResult();
@@ -50,10 +48,10 @@ public class IOController : ApiControllerBase
             return result;
         }
 
-        // 获取或创建默认项目
-        var project = GetOrCreateProject(projectCode);
-        if (project == null || !project.Enable)
-            throw new Exception("项目不存在或已禁用");
+        // 从鉴权信息中获取项目（已通过ApiAuthAttribute验证）
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
 
         // 验证文件扩展名
         var ext = Path.GetExtension(id);
@@ -312,37 +310,6 @@ public class IOController : ApiControllerBase
     #region 辅助方法
 
     private FileProject GetOrCreateProject(String code)
-    {
-        if (!code.IsNullOrEmpty())
-        {
-            var project = FileProject.FindByCode(code);
-            if (project != null) return project;
-        }
-
-        // 查找或创建默认项目
-        var defaultProject = FileProject.Find(FileProject._.Code == "default");
-        if (defaultProject == null)
-        {
-            defaultProject = new FileProject
-            {
-                Code = "default",
-                Name = "默认项目",
-                Description = "系统自动创建的默认项目",
-                DefaultAccessLevel = 2,
-                RateLimitPerIp = 10,
-                RateLimitPerFile = 20,
-                Enable = true,
-                Status = 1,
-                CreateTime = DateTime.Now
-            };
-            defaultProject.Insert();
-            XTrace.WriteLine($"创建默认项目：{defaultProject.Id}");
-        }
-
-        return defaultProject;
-    }
-
-    private Boolean ValidateExtension(String ext, FileProject project)
     {
         if (ext.IsNullOrEmpty()) return true;
 

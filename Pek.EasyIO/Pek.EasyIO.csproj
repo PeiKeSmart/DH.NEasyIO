@@ -40,6 +40,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Entity\Config\**" />
+    <Content Remove="Entity\Config\**" />
+    <EmbeddedResource Remove="Entity\Config\**" />
+    <None Remove="Entity\Config\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="EasyClient.cs" />
   </ItemGroup>
 
