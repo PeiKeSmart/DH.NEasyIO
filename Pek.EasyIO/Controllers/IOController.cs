@@ -309,7 +309,8 @@ public class IOController : ApiControllerBase
 
     #region 辅助方法
 
-    private FileProject GetOrCreateProject(String code)
+    /// <summary>验证文件扩展名是否允许</summary>
+    private Boolean ValidateExtension(String ext, FileProject project)
     {
         if (ext.IsNullOrEmpty()) return true;
 
