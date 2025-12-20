@@ -36,8 +36,8 @@ public class IOController : ApiControllerBase
     /// <param name="isPublic">是否公开（可选）</param>
     /// <returns></returns>
     [HttpPut]
-    public async Task<Object> Put(String id, String category = null,
-        String businessType = null, String businessId = null, Boolean isPublic = false)
+    public async Task<Object> Put([FromForm] String id, [FromForm] String category = null,
+        [FromForm] String businessType = null, [FromForm] String businessId = null, [FromForm] Boolean isPublic = false)
     {
         var result = new DGResult();
 
@@ -102,7 +102,7 @@ public class IOController : ApiControllerBase
             if (existing != null && existing.Status == 1 && !existing.IsDeleted)
             {
                 XTrace.WriteLine($"文件已存在，返回已有记录：{existing.Id}");
-                
+
                 return new
                 {
                     id = existing.Id,
