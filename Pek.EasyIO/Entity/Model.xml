@@ -112,14 +112,13 @@
         <Column Name="RateLimitPerIp" DataType="Int32" Description="每IP每分钟限制" Default="10" />
         <Column Name="RateLimitPerFile" DataType="Int32" Description="每文件每分钟限制" Default="20" />
         <Column Name="Enable" DataType="Boolean" Description="是否启用" Default="True" />
-        <Column Name="Status" DataType="Int32" Description="状态" Default="1" />
         <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="创建时间" />
         <Column Name="UpdateTime" DataType="DateTime" Description="更新时间" />
         <Column Name="Remark" DataType="String" Length="500" Description="备注" />
       </Columns>
       <Indexes>
         <Index Columns="Code" Unique="True" />
-        <Index Columns="Enable,Status" />
+        <Index Columns="Enable" />
       </Indexes>
     </Table>
     <Table Name="DownloadLog" Description="下载日志">

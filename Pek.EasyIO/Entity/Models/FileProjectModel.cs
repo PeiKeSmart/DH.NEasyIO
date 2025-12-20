@@ -53,9 +53,6 @@ public partial class FileProjectModel
     /// <summary>是否启用</summary>
     public Boolean Enable { get; set; }
 
-    /// <summary>状态</summary>
-    public Int32 Status { get; set; }
-
     /// <summary>创建时间</summary>
     public DateTime CreateTime { get; set; }
 
@@ -85,7 +82,6 @@ public partial class FileProjectModel
         RateLimitPerIp = model.RateLimitPerIp;
         RateLimitPerFile = model.RateLimitPerFile;
         Enable = model.Enable;
-        Status = model.Status;
         CreateTime = model.CreateTime;
         UpdateTime = model.UpdateTime;
         Remark = model.Remark;

@@ -53,9 +53,6 @@ public partial interface IFileProject
     /// <summary>是否启用</summary>
     Boolean Enable { get; set; }
 
-    /// <summary>状态</summary>
-    Int32 Status { get; set; }
-
     /// <summary>创建时间</summary>
     DateTime CreateTime { get; set; }
 

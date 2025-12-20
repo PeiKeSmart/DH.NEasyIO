@@ -18,7 +18,7 @@ namespace HlktechFileStorage.Entity;
 [DataObject]
 [Description("文件项目")]
 [BindIndex("IU_FileProject_Code", true, "Code")]
-[BindIndex("IX_FileProject_Enable_Status", false, "Enable,Status")]
+[BindIndex("IX_FileProject_Enable", false, "Enable")]
 [BindTable("FileProject", Description = "文件项目", ConnName = "EasyFile", DbType = DatabaseType.None)]
 public partial class FileProject : IFileProject, IEntity<IFileProject>
 {
@@ -135,14 +135,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
     [BindColumn("Enable", "是否启用", "")]
     public Boolean Enable { get => _Enable; set { if (OnPropertyChanging("Enable", value)) { _Enable = value; OnPropertyChanged("Enable"); } } }
 
-    private Int32 _Status;
-    /// <summary>状态</summary>
-    [DisplayName("状态")]
-    [Description("状态")]
-    [DataObjectField(false, false, false, 0)]
-    [BindColumn("Status", "状态", "")]
-    public Int32 Status { get => _Status; set { if (OnPropertyChanging("Status", value)) { _Status = value; OnPropertyChanged("Status"); } } }
-
     private DateTime _CreateTime;
     /// <summary>创建时间</summary>
     [DisplayName("创建时间")]
@@ -187,7 +179,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         RateLimitPerIp = model.RateLimitPerIp;
         RateLimitPerFile = model.RateLimitPerFile;
         Enable = model.Enable;
-        Status = model.Status;
         CreateTime = model.CreateTime;
         UpdateTime = model.UpdateTime;
         Remark = model.Remark;
@@ -216,7 +207,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
             "RateLimitPerIp" => _RateLimitPerIp,
             "RateLimitPerFile" => _RateLimitPerFile,
             "Enable" => _Enable,
-            "Status" => _Status,
             "CreateTime" => _CreateTime,
             "UpdateTime" => _UpdateTime,
             "Remark" => _Remark,
@@ -240,7 +230,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
                 case "RateLimitPerIp": _RateLimitPerIp = value.ToInt(); break;
                 case "RateLimitPerFile": _RateLimitPerFile = value.ToInt(); break;
                 case "Enable": _Enable = value.ToBoolean(); break;
-                case "Status": _Status = value.ToInt(); break;
                 case "CreateTime": _CreateTime = value.ToDateTime(); break;
                 case "UpdateTime": _UpdateTime = value.ToDateTime(); break;
                 case "Remark": _Remark = Convert.ToString(value); break;
@@ -288,19 +277,17 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
     /// <summary>高级查询</summary>
     /// <param name="code">项目编码（唯一）</param>
     /// <param name="enable">是否启用</param>
-    /// <param name="status">状态</param>
     /// <param name="start">更新时间开始</param>
     /// <param name="end">更新时间结束</param>
     /// <param name="key">关键字</param>
     /// <param name="page">分页参数信息。可携带统计和数据权限扩展查询等信息</param>
     /// <returns>实体列表</returns>
-    public static IList<FileProject> Search(String code, Boolean? enable, Int32 status, DateTime start, DateTime end, String key, PageParameter page)
+    public static IList<FileProject> Search(String code, Boolean? enable, DateTime start, DateTime end, String key, PageParameter page)
     {
         var exp = new WhereExpression();
 
         if (!code.IsNullOrEmpty()) exp &= _.Code == code;
         if (enable != null) exp &= _.Enable == enable;
-        if (status >= 0) exp &= _.Status == status;
         exp &= _.UpdateTime.Between(start, end);
         if (!key.IsNullOrEmpty()) exp &= SearchWhereByKeys(key);
 
@@ -353,9 +340,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
 
         /// <summary>是否启用</summary>
         public static readonly Field Enable = FindByName("Enable");
-
-        /// <summary>状态</summary>
-        public static readonly Field Status = FindByName("Status");
 
         /// <summary>创建时间</summary>
         public static readonly Field CreateTime = FindByName("CreateTime");
@@ -413,9 +397,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
 
         /// <summary>是否启用</summary>
         public const String Enable = "Enable";
-
-        /// <summary>状态</summary>
-        public const String Status = "Status";
 
         /// <summary>创建时间</summary>
         public const String CreateTime = "CreateTime";
