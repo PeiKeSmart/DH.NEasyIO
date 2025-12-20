@@ -1,10 +1,18 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using HlktechFileStorage.Entity;
+
+using Microsoft.AspNetCore.Mvc;
 
 using NewLife;
+using NewLife.Log;
 
+using HlktechFileStorage.Entity;
+
+using Pek.EasyIO.Services;
 using Pek.Models;
 using Pek.MVC;
 using Pek.Swagger;
+
+using System.Security.Cryptography;
 
 namespace Pek.EasyIO.Controllers;
 
@@ -14,16 +22,24 @@ namespace Pek.EasyIO.Controllers;
 //[Authorize("jwt")]
 public class IOController : ApiControllerBase
 {
-    private String GetPath(String id)
-    {
-        return EasyIOSetting.Current.Path.CombinePath(id).GetFullPath();
-    }
+    private readonly IFileStorageService _storageService;
+
+    /// <summary>实例化文件控制器</summary>
+    public IOController() => _storageService = new LocalFileStorageService();
+
+    private String GetPath(String id) => EasyIOSetting.Current.Path.CombinePath(id).GetFullPath();
 
     /// <summary>上传文件对象</summary>
     /// <param name="id">文件名称。可包含路径</param>
+    /// <param name="projectCode">项目编码（可选）</param>
+    /// <param name="category">文件分类（可选）</param>
+    /// <param name="businessType">业务类型（可选）</param>
+    /// <param name="businessId">业务ID（可选）</param>
+    /// <param name="isPublic">是否公开（可选）</param>
     /// <returns></returns>
     [HttpPut]
-    public async Task<Object> Put(String id)
+    public async Task<Object> Put(String id, String projectCode = null, String category = null,
+        String businessType = null, String businessId = null, Boolean isPublic = false)
     {
         var result = new DGResult();
 
@@ -34,18 +50,130 @@ public class IOController : ApiControllerBase
             return result;
         }
 
-        var fileName = GetPath(id);
+        // 获取或创建默认项目
+        var project = GetOrCreateProject(projectCode);
+        if (project == null || !project.Enable)
+            throw new Exception("项目不存在或已禁用");
 
-        // 保存文件
+        // 验证文件扩展名
+        var ext = Path.GetExtension(id);
+        if (!ValidateExtension(ext, project))
+            throw new Exception($"不支持的文件类型：{ext}");
+
+        // 保存文件到磁盘
+        var fileName = GetPath(id);
         fileName.EnsureDirectory(true);
 
         var ms = Request.Body;
-        using var fs = new FileStream(fileName, FileMode.OpenOrCreate);
-        await ms.CopyToAsync(fs);
-        fs.SetLength(fs.Length);
+        String hash;
+        Int64 fileSize;
+
+        using (var fs = new FileStream(fileName, FileMode.OpenOrCreate))
+        {
+            // 计算哈希的同时保存文件
+            using var md5 = MD5.Create();
+            var buffer = new Byte[8192];
+            Int32 bytesRead;
+            fileSize = 0;
+
+            while ((bytesRead = await ms.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                await fs.WriteAsync(buffer, 0, bytesRead);
+                md5.TransformBlock(buffer, 0, bytesRead, buffer, 0);
+                fileSize += bytesRead;
+            }
+
+            md5.TransformFinalBlock(buffer, 0, 0);
+            hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
+            fs.SetLength(fileSize);
+        }
+
+        // 验证文件大小
+        if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
+        {
+            System.IO.File.Delete(fileName);
+            throw new Exception($"文件大小超过限制（{project.MaxFileSize.ToGMK()}）");
+        }
 
         var fi = fileName.AsFile();
-        return new { name = id, length = fi.Length, time = fi.LastWriteTime, IsDirectory = false };
+
+        try
+        {
+            // 检查是否已存在相同文件（去重）
+            var existing = FileEntry.FindByHash(hash);
+            if (existing != null && existing.Status == 1 && !existing.IsDeleted)
+            {
+                XTrace.WriteLine($"文件已存在，返回已有记录：{existing.Id}");
+                
+                return new
+                {
+                    id = existing.Id,
+                    name = id,
+                    originalName = existing.OriginalName,
+                    length = existing.Size,
+                    hash = existing.Hash,
+                    time = existing.CreateTime,
+                    isDirectory = false,
+                    duplicate = true
+                };
+            }
+
+            // 创建文件记录
+            var entry = new FileEntry
+            {
+                Name = Path.GetFileName(id),
+                OriginalName = id,
+                Extension = ext,
+                ContentType = GetContentType(ext),
+                Size = fileSize,
+                Hash = hash,
+
+                StorageType = "Local",
+                StoragePath = fileName,
+                RelativePath = id,
+
+                AccessLevel = isPublic ? 1 : project.DefaultAccessLevel,
+                IsPublic = isPublic,
+
+                ProjectId = project.Id,
+                ProjectName = project.Name,
+                Category = category,
+
+                BusinessType = businessType,
+                BusinessId = businessId,
+
+                Status = 1,
+                CreateIP = GetClientIp(),
+                CreateTime = DateTime.Now
+            };
+
+            entry.Insert();
+
+            // 更新项目存储统计
+            project.UsedStorageSize += fileSize;
+            project.Update();
+
+            XTrace.WriteLine($"文件上传成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})");
+
+            return new
+            {
+                id = entry.Id,
+                name = id,
+                originalName = entry.OriginalName,
+                length = entry.Size,
+                hash = entry.Hash,
+                time = fi.LastWriteTime,
+                isDirectory = false,
+                projectId = entry.ProjectId,
+                category = entry.Category,
+                isPublic = entry.IsPublic
+            };
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            throw;
+        }
     }
 
     /// <summary>获取文件对象内容</summary>
@@ -180,4 +308,102 @@ public class IOController : ApiControllerBase
 
         return rs;
     }
+
+    #region 辅助方法
+
+    private FileProject GetOrCreateProject(String code)
+    {
+        if (!code.IsNullOrEmpty())
+        {
+            var project = FileProject.FindByCode(code);
+            if (project != null) return project;
+        }
+
+        // 查找或创建默认项目
+        var defaultProject = FileProject.Find(FileProject._.Code == "default");
+        if (defaultProject == null)
+        {
+            defaultProject = new FileProject
+            {
+                Code = "default",
+                Name = "默认项目",
+                Description = "系统自动创建的默认项目",
+                DefaultAccessLevel = 2,
+                RateLimitPerIp = 10,
+                RateLimitPerFile = 20,
+                Enable = true,
+                Status = 1,
+                CreateTime = DateTime.Now
+            };
+            defaultProject.Insert();
+            XTrace.WriteLine($"创建默认项目：{defaultProject.Id}");
+        }
+
+        return defaultProject;
+    }
+
+    private Boolean ValidateExtension(String ext, FileProject project)
+    {
+        if (ext.IsNullOrEmpty()) return true;
+
+        ext = ext.ToLower();
+
+        // 检查禁止列表
+        if (!project.ForbiddenExtensions.IsNullOrEmpty())
+        {
+            var forbidden = project.ForbiddenExtensions.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            if (forbidden.Any(x => x.Trim().Equals(ext, StringComparison.OrdinalIgnoreCase)))
+                return false;
+        }
+
+        // 检查允许列表
+        if (!project.AllowedExtensions.IsNullOrEmpty())
+        {
+            var allowed = project.AllowedExtensions.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            return allowed.Any(x => x.Trim().Equals(ext, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return true;
+    }
+
+    private String GetContentType(String ext)
+    {
+        return ext?.ToLower() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            ".pdf" => "application/pdf",
+            ".txt" => "text/plain",
+            ".json" => "application/json",
+            ".xml" => "application/xml",
+            ".zip" => "application/zip",
+            ".rar" => "application/x-rar-compressed",
+            ".7z" => "application/x-7z-compressed",
+            ".mp4" => "video/mp4",
+            ".avi" => "video/x-msvideo",
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".doc" or ".docx" => "application/msword",
+            ".xls" or ".xlsx" => "application/vnd.ms-excel",
+            ".ppt" or ".pptx" => "application/vnd.ms-powerpoint",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private String GetClientIp()
+    {
+        var ip = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (ip.IsNullOrEmpty())
+            ip = Request.Headers["X-Real-IP"].FirstOrDefault();
+        if (ip.IsNullOrEmpty())
+            ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        return ip ?? "unknown";
+    }
+
+    #endregion
 }

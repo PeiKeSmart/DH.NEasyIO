@@ -156,6 +156,15 @@ public partial class FileEntry : DHEntityBase<FileEntry>
     /// <summary>获取业务类型列表，字段缓存10分钟，分组统计数据最多的前20种，用于魔方前台下拉选择</summary>
     /// <returns></returns>
     public static IDictionary<String, String> GetBusinessTypeList() => _BusinessTypeCache.FindAllName();
+
+    /// <summary>根据哈希查找文件</summary>
+    /// <param name="hash">文件哈希</param>
+    /// <returns></returns>
+    public static FileEntry FindByHash(String hash)
+    {
+        if (hash.IsNullOrEmpty()) return null;
+        return Find(_.Hash == hash & _.Status == 1 & _.IsDeleted == false);
+    }
     #endregion
 
     #region 业务操作
