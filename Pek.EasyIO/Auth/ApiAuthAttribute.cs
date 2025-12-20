@@ -17,17 +17,28 @@ public class ApiAuthAttribute : Attribute, IAsyncActionFilter
     /// <summary>执行动作过滤</summary>
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        // 如果不要求鉴权，直接通过
-        if (!EasyIOSetting.Current.ApiAuthEnabled)
-        {
-            await next();
-            return;
-        }
-
         var request = context.HttpContext.Request;
 
         // 从请求头或查询参数获取鉴权信息
         var projectCode = GetParameter(request, "X-Project-Code", "projectCode");
+
+        // 如果不要求鉴权，尝试获取项目信息但不验证签名
+        if (!EasyIOSetting.Current.ApiAuthEnabled)
+        {
+            if (!projectCode.IsNullOrEmpty())
+            {
+                var project = FileProject.FindByCode(projectCode);
+                if (project != null && project.Enable)
+                {
+                    context.HttpContext.Items["ApiProject"] = project;
+                    XTrace.WriteLine($"API鉴权已禁用，使用项目：{project.Name}({project.Code}) - {request.Method} {request.Path}");
+                }
+            }
+            
+            await next();
+            return;
+        }
+
         var timestamp = GetParameter(request, "X-Timestamp", "timestamp");
         var signature = GetParameter(request, "X-Signature", "signature");
 
