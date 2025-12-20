@@ -1,4 +1,4 @@
-using HlktechFileStorage.Entity;
+﻿using HlktechFileStorage.Entity;
 
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -14,14 +14,11 @@ public class ApiAuthAttribute : Attribute, IAsyncActionFilter
 {
     private readonly ApiSignatureValidator _validator = new();
 
-    /// <summary>是否必需鉴权（默认true）</summary>
-    public Boolean Required { get; set; } = true;
-
     /// <summary>执行动作过滤</summary>
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
         // 如果不要求鉴权，直接通过
-        if (!Required)
+        if (!EasyIOSetting.Current.ApiAuthEnabled)
         {
             await next();
             return;

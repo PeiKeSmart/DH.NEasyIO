@@ -12,6 +12,10 @@ public class EasyIOSetting : Config<EasyIOSetting>
     [Description("路径")]
     public String Path { get; set; } = "../files";
 
+    /// <summary>是否启用Api鉴权</summary>
+    [Description("是否启用Api鉴权")]
+    public Boolean ApiAuthEnabled { get; set; } = true;
+
     /// <summary>每IP每分钟最大请求数</summary>
     [Description("每IP每分钟最大请求数")]
     public Int32 RateLimitPerIp { get; set; } = 10;

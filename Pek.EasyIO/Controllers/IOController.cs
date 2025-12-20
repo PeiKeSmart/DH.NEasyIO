@@ -18,7 +18,7 @@ namespace Pek.EasyIO.Controllers;
 /// <summary>文件控制器</summary>
 [Produces("application/json")]
 [CustomRoute(ApiVersions.V1)]
-[ApiAuth] // 启用API鉴权
+[ApiAuth(Required = false)] // 启用API鉴权
 public class IOController : ApiControllerBase
 {
     private readonly IFileStorageService _storageService;
