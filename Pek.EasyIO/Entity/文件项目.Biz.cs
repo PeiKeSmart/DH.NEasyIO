@@ -68,34 +68,36 @@ public partial class FileProject : DHEntityBase<FileProject>
         return true;
     }
 
-    ///// <summary>首次连接数据库时初始化数据，仅用于实体类重载，用户不应该调用该方法</summary>
-    //[EditorBrowsable(EditorBrowsableState.Never)]
-    //protected override void InitData()
-    //{
-    //    // InitData一般用于当数据表没有数据时添加一些默认数据，该实体类的任何第一次数据库操作都会触发该方法，默认异步调用
-    //    if (Meta.Session.Count > 0) return;
+    /// <summary>首次连接数据库时初始化数据，仅用于实体类重载，用户不应该调用该方法</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    protected override void InitData()
+    {
+        // InitData一般用于当数据表没有数据时添加一些默认数据，该实体类的任何第一次数据库操作都会触发该方法，默认异步调用
+        if (Meta.Session.Count > 0) return;
 
-    //    if (XTrace.Debug) XTrace.WriteLine("开始初始化FileProject[文件项目]数据……");
+        if (XTrace.Debug) XTrace.WriteLine("开始初始化FileProject[文件项目]数据……");
 
-    //    var entity = new FileProject();
-    //    entity.Code = "abc";
-    //    entity.Name = "abc";
-    //    entity.Description = "abc";
-    //    entity.ApiSecret = "abc";
-    //    entity.MaxStorageSize = 0;
-    //    entity.UsedStorageSize = 0;
-    //    entity.MaxFileSize = 0;
-    //    entity.AllowedExtensions = "abc";
-    //    entity.ForbiddenExtensions = "abc";
-    //    entity.DefaultAccessLevel = 0;
-    //    entity.RateLimitPerIp = 0;
-    //    entity.RateLimitPerFile = 0;
-    //    entity.Enable = true;
-    //    entity.Status = 0;
-    //    entity.Insert();
+        var entity = new FileProject
+        {
+            Code = "default",
+            Name = "默认项目",
+            Description = "系统默认项目，用于存放常规文件，公开访问",
+            StoragePath = "../files/default",
+            ApiSecret = Guid.NewGuid().ToString("N"),
+            MaxStorageSize = 0,  // 不限制存储空间
+            UsedStorageSize = 0,
+            MaxFileSize = 100 * 1024 * 1024,  // 100MB
+            AllowedExtensions = null,  // 不限制扩展名
+            ForbiddenExtensions = null,  // 不禁止任何扩展名（根据实际需求配置）
+            DefaultAccessLevel = 1,  // 1=公开访问
+            RateLimitPerIp = 100,  // 每IP每分钟100次
+            RateLimitPerFile = 10,  // 每文件每分钟10次
+            Enable = true
+        };
+        entity.Insert();
 
-    //    if (XTrace.Debug) XTrace.WriteLine("完成初始化FileProject[文件项目]数据！");
-    //}
+        if (XTrace.Debug) XTrace.WriteLine("完成初始化FileProject[文件项目]数据！");
+    }
 
     ///// <summary>已重载。基类先调用Valid(true)验证数据，然后在事务保护内调用OnInsert</summary>
     ///// <returns></returns>
