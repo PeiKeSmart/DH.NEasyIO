@@ -92,9 +92,6 @@ public partial interface IFileEntry
     /// <summary>其他元数据（JSON）</summary>
     String? Metadata { get; set; }
 
-    /// <summary>状态（0=已删除,1=正常,2=处理中,3=已禁用）</summary>
-    Int32 Status { get; set; }
-
     /// <summary>是否已删除</summary>
     Boolean IsDeleted { get; set; }
 

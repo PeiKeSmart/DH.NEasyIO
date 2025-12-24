@@ -70,7 +70,6 @@
         <Column Name="Height" DataType="Int32" Description="图片高度" Default="0" />
         <Column Name="Duration" DataType="Int32" Description="视频/音频时长（秒）" Default="0" />
         <Column Name="Metadata" DataType="String" Length="2000" Description="其他元数据（JSON）" />
-        <Column Name="Status" DataType="Int32" Description="状态（0=已删除,1=正常,2=处理中,3=已禁用）" Default="1" />
         <Column Name="IsDeleted" DataType="Boolean" Description="是否已删除" Default="False" />
         <Column Name="DeletedTime" DataType="DateTime" Description="删除时间" />
         <Column Name="IsScanned" DataType="Boolean" Description="是否已病毒扫描" Default="False" />
@@ -88,11 +87,12 @@
       </Columns>
       <Indexes>
         <Index Columns="Hash" />
-        <Index Columns="ProjectId,Status" />
-        <Index Columns="AccessLevel,Status" />
+        <Index Columns="IsDeleted" />
+        <Index Columns="ProjectId,IsDeleted" />
+        <Index Columns="AccessLevel,IsDeleted" />
         <Index Columns="CreateTime" />
-        <Index Columns="BusinessType,BusinessId" />
-        <Index Columns="OwnerId,Status" />
+        <Index Columns="BusinessType,BusinessId,IsDeleted" />
+        <Index Columns="OwnerId,IsDeleted" />
       </Indexes>
     </Table>
     <Table Name="FileProject" Description="文件项目">

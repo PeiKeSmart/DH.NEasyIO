@@ -92,9 +92,6 @@ public partial class FileEntryModel
     /// <summary>其他元数据（JSON）</summary>
     public String? Metadata { get; set; }
 
-    /// <summary>状态（0=已删除,1=正常,2=处理中,3=已禁用）</summary>
-    public Int32 Status { get; set; }
-
     /// <summary>是否已删除</summary>
     public Boolean IsDeleted { get; set; }
 
@@ -170,7 +167,6 @@ public partial class FileEntryModel
         Height = model.Height;
         Duration = model.Duration;
         Metadata = model.Metadata;
-        Status = model.Status;
         IsDeleted = model.IsDeleted;
         DeletedTime = model.DeletedTime;
         IsScanned = model.IsScanned;

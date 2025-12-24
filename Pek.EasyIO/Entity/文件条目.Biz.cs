@@ -163,7 +163,7 @@ public partial class FileEntry : DHEntityBase<FileEntry>
     public static FileEntry FindByHash(String hash)
     {
         if (hash.IsNullOrEmpty()) return null;
-        return Find(_.Hash == hash & _.Status == 1 & _.IsDeleted == false);
+        return Find(_.Hash == hash & _.IsDeleted == false);
     }
     #endregion
 

@@ -115,7 +115,7 @@ public class IOController : ApiControllerBase
         {
             // 检查是否已存在相同文件（去重）
             var existing = FileEntry.FindByHash(hash);
-            if (existing != null && existing.Status == 1 && !existing.IsDeleted)
+            if (existing != null && !existing.IsDeleted)
             {
                 XTrace.WriteLine($"文件已存在，返回已有记录：{existing.Id}");
 
@@ -155,7 +155,6 @@ public class IOController : ApiControllerBase
                 BusinessType = businessType,
                 BusinessId = businessId,
 
-                Status = 1,
                 CreateIP = GetClientIp(),
                 CreateTime = DateTime.Now
             };
@@ -205,8 +204,8 @@ public class IOController : ApiControllerBase
         var entry = FileEntry.FindById(id);
         if (entry == null) throw new Exception($"文件不存在：{id}");
 
-        if (entry.Status != 1 || entry.IsDeleted)
-            throw new Exception("文件已被删除或禁用");
+        if (entry.IsDeleted)
+            throw new Exception("文件已被删除");
 
         // 2. 获取当前项目（可能为空，如果鉴权禁用）
         var project = this.GetCurrentProject();
@@ -215,17 +214,25 @@ public class IOController : ApiControllerBase
         if (project != null && entry.ProjectId != project.Id)
             throw new Exception("无权访问此文件");
 
-        // 4. 验证访问级别（AccessLevel: 1=Public, 2=Private, 3=Internal）
-        if (entry.AccessLevel == 2) // Private
+        // 4. 查询文件所属项目（用于验证访问权限和获取存储目录）
+        var fileProject = FileProject.FindById(entry.ProjectId);
+        if (fileProject == null)
+            throw new Exception("文件所属项目不存在");
+
+        // 5. 验证访问级别（AccessLevel: 1=Public, 2=Private, 3=Internal）
+        // 取更严格的访问控制：MAX(项目级别, 文件级别)
+        var effectiveAccessLevel = Math.Max(fileProject.DefaultAccessLevel, entry.AccessLevel);
+        
+        if (effectiveAccessLevel == 2) // Private
         {
             if (project == null)
                 throw new Exception("私有文件需要项目鉴权");
         }
-
-        // 5. 查询文件所属项目（用于获取存储目录）
-        var fileProject = FileProject.FindById(entry.ProjectId);
-        if (fileProject == null)
-            throw new Exception("文件所属项目不存在");
+        else if (effectiveAccessLevel == 3) // Internal
+        {
+            if (project == null || project.Id != entry.ProjectId)
+                throw new Exception("内部文件仅限同项目访问");
+        }
 
         // 6. 组合完整文件路径
         var filePath = GetProjectFilePath(fileProject, entry.RelativePath);
