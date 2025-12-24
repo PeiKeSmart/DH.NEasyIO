@@ -174,20 +174,128 @@ public class IOController : ApiControllerBase
         }
     }
 
-    /// <summary>获取文件对象内容</summary>
-    /// <param name="id"></param>
+    /// <summary>下载文件（通过数据库ID）</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <param name="inline">是否内联显示（预览）。true=预览，false=下载</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
     [HttpGet]
-    public IActionResult Get(String id)
+    public async Task<IActionResult> Get(Int64 id, Boolean inline = false)
     {
-        if (id.IsNullOrEmpty()) throw new Exception("找不到记录！id=" + id);
+        if (id <= 0) throw new Exception("无效的文件ID");
 
-        var fileName = GetPath(id);
-        var fi = fileName.AsFile();
-        if (!fi.Exists) throw new Exception("文件不存在");
+        var startTime = DateTime.Now;
 
-        return File(fi.ReadBytes(), "application/octet-stream");
+        // 1. 查询文件记录
+        var entry = FileEntry.FindById(id);
+        if (entry == null) throw new Exception($"文件不存在：{id}");
+
+        if (entry.Status != 1 || entry.IsDeleted)
+            throw new Exception("文件已被删除或禁用");
+
+        // 2. 获取当前项目（可能为空，如果鉴权禁用）
+        var project = this.GetCurrentProject();
+
+        // 3. 验证项目权限
+        if (project != null && entry.ProjectId != project.Id)
+            throw new Exception("无权访问此文件");
+
+        // 4. 验证访问级别（AccessLevel: 1=Public, 2=Private, 3=Internal）
+        if (entry.AccessLevel == 2) // Private
+        {
+            if (project == null)
+                throw new Exception("私有文件需要项目鉴权");
+        }
+
+        // 5. 检查文件是否存在
+        var filePath = entry.StoragePath;
+        if (!System.IO.File.Exists(filePath))
+            throw new Exception("物理文件不存在");
+
+        // 6. 检查下载次数限制
+        if (entry.MaxDownloads > 0 && entry.DownloadCount >= entry.MaxDownloads)
+            throw new Exception($"文件下载次数已达上限（{entry.MaxDownloads}）");
+
+        // 7. 检查过期时间（DateTime.MinValue 表示永久有效）
+        if (entry.ExpiresAt != DateTime.MinValue && entry.ExpiresAt < DateTime.Now)
+            throw new Exception("文件已过期");
+
+        var clientIp = GetClientIp();
+
+        try
+        {
+            // 8. 更新下载计数
+            entry.DownloadCount++;
+            entry.Update();
+
+            // 9. 记录下载日志
+            var log = new DownloadLog
+            {
+                FileId = entry.Id,
+                FileName = entry.Name,
+                ProjectId = entry.ProjectId,
+                AccessType = "Direct",
+                ClientIp = clientIp,
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                Referer = Request.Headers["Referer"].FirstOrDefault(),
+                Success = true,
+                ResponseCode = 200,
+                BytesTransferred = entry.Size,
+                CreateTime = DateTime.Now
+            };
+
+            // 10. 返回文件流
+            var stream = System.IO.File.OpenRead(filePath);
+            var contentType = entry.ContentType ?? "application/octet-stream";
+
+            // 设置 Content-Disposition
+            var disposition = inline ? "inline" : "attachment";
+            Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{Uri.EscapeDataString(entry.Name)}\"");
+
+            XTrace.WriteLine($"文件下载：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}");
+
+            // 异步记录日志（不阻塞响应）
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    log.DownloadTime = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
+                    log.Speed = log.DownloadTime > 0 ? log.BytesTransferred * 1000 / log.DownloadTime : 0;
+                    log.Insert();
+                }
+                catch (Exception ex)
+                {
+                    XTrace.WriteException(ex);
+                }
+            });
+
+            return File(stream, contentType, entry.Name, enableRangeProcessing: true);
+        }
+        catch (Exception ex)
+        {
+            // 记录失败日志
+            var errorLog = new DownloadLog
+            {
+                FileId = entry.Id,
+                FileName = entry.Name,
+                ProjectId = entry.ProjectId,
+                AccessType = "Direct",
+                ClientIp = clientIp,
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                Success = false,
+                FailReason = ex.Message,
+                ResponseCode = 500,
+                CreateTime = DateTime.Now
+            };
+
+            _ = Task.Run(() =>
+            {
+                try { errorLog.Insert(); }
+                catch { }
+            });
+
+            throw;
+        }
     }
 
     /// <summary>获取文件对象的访问Url</summary>
