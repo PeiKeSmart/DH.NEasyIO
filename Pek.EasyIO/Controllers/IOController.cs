@@ -18,7 +18,6 @@ namespace Pek.EasyIO.Controllers;
 /// <summary>文件控制器</summary>
 [Produces("application/json")]
 [CustomRoute(ApiVersions.V1)]
-[ApiAuth()] // 启用API鉴权
 public class IOController : ApiControllerBase
 {
     private readonly IFileStorageService _storageService;
@@ -52,6 +51,7 @@ public class IOController : ApiControllerBase
     /// <param name="isPublic">是否公开（可选）</param>
     /// <param name="remark">备注说明（必填）</param>
     /// <returns></returns>
+    [ApiAuth]  // 上传需要API鉴权
     [HttpPut]
     public async Task<Object> Put(IFormFile file, [FromForm] String remark,
         [FromForm] String category = null, [FromForm] String businessType = null, 
@@ -381,6 +381,7 @@ public class IOController : ApiControllerBase
     /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
+    [ApiAuth]  // 删除需要API鉴权
     [HttpDelete]
     public Int32 Delete(Int64 id)
     {
