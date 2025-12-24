@@ -50,10 +50,12 @@ public class IOController : ApiControllerBase
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
     /// <param name="isPublic">是否公开（可选）</param>
+    /// <param name="remark">备注说明（必填）</param>
     /// <returns></returns>
     [HttpPut]
-    public async Task<Object> Put(IFormFile file, [FromForm] String category = null,
-        [FromForm] String businessType = null, [FromForm] String businessId = null, [FromForm] Boolean isPublic = false)
+    public async Task<Object> Put(IFormFile file, [FromForm] String remark,
+        [FromForm] String category = null, [FromForm] String businessType = null, 
+        [FromForm] String businessId = null, [FromForm] Boolean isPublic = false)
     {
         var result = new DGResult();
 
@@ -71,6 +73,14 @@ public class IOController : ApiControllerBase
         {
             result.ErrCode = 10000;
             result.Message = GetResource("文件名不能为空");
+            return result;
+        }
+
+        // 验证备注说明是否为空
+        if (remark.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "备注说明不能为空";
             return result;
         }
 
@@ -195,7 +205,8 @@ public class IOController : ApiControllerBase
                 BusinessId = businessId,
 
                 CreateIP = GetClientIp(),
-                CreateTime = DateTime.Now
+                CreateTime = DateTime.Now,
+                Remark = remark
             };
 
             entry.Insert();
@@ -217,7 +228,8 @@ public class IOController : ApiControllerBase
                 isDirectory = false,
                 projectId = entry.ProjectId,
                 category = entry.Category,
-                isPublic = entry.IsPublic
+                isPublic = entry.IsPublic,
+                remark = entry.Remark
             };
         }
         catch (Exception ex)
