@@ -255,7 +255,7 @@ public class IOController : ApiControllerBase
     {
         if (id <= 0) throw new Exception("无效的文件ID");
 
-        // 0. 限流检查
+        // 0. 限流检查（早期退出，减少资源浪费）
         var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
         if (!_rateLimiter.CheckIpRateLimit(clientIp))
         {
@@ -269,125 +269,141 @@ public class IOController : ApiControllerBase
             return StatusCode(429, new { error = "该文件下载过于频繁，请稍后再试" });
         }
 
-        var startTime = DateTime.Now;
-
         // 1. 查询文件记录
         var entry = FileEntry.FindById(id);
         if (entry == null) throw new Exception($"文件不存在：{id}");
+        if (entry.IsDeleted) throw new Exception("文件已被删除");
 
-        if (entry.IsDeleted)
-            throw new Exception("文件已被删除");
+        // 2. 查询文件所属项目（提前查询，避免后续重复查询）
+        var fileProject = FileProject.FindById(entry.ProjectId);
+        if (fileProject == null) throw new Exception("文件所属项目不存在");
 
-        // 2. 获取当前项目（可能为空，如果鉴权禁用）
+        // 3. 获取当前项目并验证权限
         var project = this.GetCurrentProject();
-
-        // 3. 验证项目权限
         if (project != null && entry.ProjectId != project.Id)
             throw new Exception("无权访问此文件");
 
-        // 4. 查询文件所属项目（用于验证访问权限和获取存储目录）
-        var fileProject = FileProject.FindById(entry.ProjectId);
-        if (fileProject == null)
-            throw new Exception("文件所属项目不存在");
-
-        // 5. 验证访问级别（AccessLevel: 1=Public, 2=Private, 3=Internal）
-        // 取更严格的访问控制：MAX(项目级别, 文件级别)
+        // 4. 验证访问级别（AccessLevel: 1=Public, 2=Private, 3=Internal）
         var effectiveAccessLevel = Math.Max(fileProject.DefaultAccessLevel, entry.AccessLevel);
-        
-        if (effectiveAccessLevel == 2) // Private
-        {
-            if (project == null)
-                throw new Exception("私有文件需要项目鉴权");
-        }
-        else if (effectiveAccessLevel == 3) // Internal
-        {
-            if (project == null || project.Id != entry.ProjectId)
-                throw new Exception("内部文件仅限同项目访问");
-        }
+        if (effectiveAccessLevel == 2 && project == null)
+            throw new Exception("私有文件需要项目鉴权");
+        if (effectiveAccessLevel == 3 && (project == null || project.Id != entry.ProjectId))
+            throw new Exception("内部文件仅限同项目访问");
 
-        // 6. 组合完整文件路径
+        // 5. 组合完整文件路径并验证
         var filePath = GetProjectFilePath(fileProject, entry.RelativePath);
-        if (!System.IO.File.Exists(filePath))
-            throw new Exception("物理文件不存在");
+        var fileInfo = new FileInfo(filePath);
+        if (!fileInfo.Exists) throw new Exception("物理文件不存在");
 
-        // 7. 检查下载次数限制
+        // 6. 检查下载次数限制
         if (entry.MaxDownloads > 0 && entry.DownloadCount >= entry.MaxDownloads)
             throw new Exception($"文件下载次数已达上限（{entry.MaxDownloads}）");
 
-        // 8. 检查过期时间（DateTime.MinValue 表示永久有效）
+        // 7. 检查过期时间
         if (entry.ExpiresAt != DateTime.MinValue && entry.ExpiresAt < DateTime.Now)
             throw new Exception("文件已过期");
 
+        // 8. HTTP 缓存优化：设置 ETag 和 Last-Modified
+        var lastModified = fileInfo.LastWriteTimeUtc;
+        var etag = $"\"{entry.Hash}-{lastModified.Ticks}\"";
+        
+        // 验证客户端缓存（304 Not Modified）
+        var requestETag = Request.Headers["If-None-Match"].ToString();
+        var requestModifiedSince = Request.Headers["If-Modified-Since"].ToString();
+        
+        if (!requestETag.IsNullOrEmpty() && requestETag == etag)
+            return StatusCode(304); // Not Modified
+        
+        if (!requestModifiedSince.IsNullOrEmpty() && DateTime.TryParse(requestModifiedSince, out var modifiedSince))
+        {
+            if (lastModified <= modifiedSince.ToUniversalTime())
+                return StatusCode(304);
+        }
+
+        // 9. 准备响应头（在返回文件前设置）
+        var contentType = entry.ContentType ?? "application/octet-stream";
+        var disposition = inline ? "inline" : "attachment";
+        var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
+        
+        Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
+        Response.Headers.Append("ETag", etag);
+        Response.Headers.Append("Last-Modified", lastModified.ToString("R"));
+        
+        // 公开文件设置缓存控制（1小时）
+        if (effectiveAccessLevel == 1)
+            Response.Headers.Append("Cache-Control", "public, max-age=3600");
+        else
+            Response.Headers.Append("Cache-Control", "private, no-cache");
+
+        // 10. 异步更新下载计数和记录日志（不阻塞响应）
+        var startTime = DateTime.Now;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                // 更新下载计数
+                entry.DownloadCount++;
+                entry.Update();
+
+                // 记录成功日志
+                var log = new DownloadLog
+                {
+                    FileId = entry.Id,
+                    FileName = entry.Name,
+                    ProjectId = entry.ProjectId,
+                    AccessType = "Direct",
+                    ClientIp = clientIp,
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    Referer = Request.Headers["Referer"].FirstOrDefault(),
+                    Success = true,
+                    ResponseCode = 200,
+                    BytesTransferred = entry.Size,
+                    DownloadTime = (Int32)(DateTime.Now - startTime).TotalMilliseconds,
+                    CreateTime = DateTime.Now
+                };
+                log.Speed = log.DownloadTime > 0 ? log.BytesTransferred * 1000 / log.DownloadTime : 0;
+                log.Insert();
+            }
+            catch (Exception ex)
+            {
+                XTrace.WriteException(ex);
+            }
+        });
+
+        XTrace.WriteLine($"文件下载：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}");
+
+        // 11. 返回文件（使用 PhysicalFile 获得最佳性能）
+        // PhysicalFile 优势：
+        // - 自动使用 SendFile API（零拷贝传输）
+        // - 自动处理 Range 请求（断点续传）
+        // - 自动管理流释放
+        // - 内置缓冲区优化
         try
         {
-            // 9. 更新下载计数
-            entry.DownloadCount++;
-            entry.Update();
-
-            // 10. 记录下载日志
-            var log = new DownloadLog
-            {
-                FileId = entry.Id,
-                FileName = entry.Name,
-                ProjectId = entry.ProjectId,
-                AccessType = "Direct",
-                ClientIp = clientIp,
-                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                Referer = Request.Headers["Referer"].FirstOrDefault(),
-                Success = true,
-                ResponseCode = 200,
-                BytesTransferred = entry.Size,
-                CreateTime = DateTime.Now
-            };
-
-            // 11. 返回文件流
-            var stream = System.IO.File.OpenRead(filePath);
-            var contentType = entry.ContentType ?? "application/octet-stream";
-
-            // 设置 Content-Disposition（使用原始文件名）
-            var disposition = inline ? "inline" : "attachment";
-            var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
-            Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
-
-            XTrace.WriteLine($"文件下载：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}");
-
-            // 异步记录日志（不阻塞响应）
+            return PhysicalFile(filePath, contentType, downloadFileName, enableRangeProcessing: true);
+        }
+        catch (Exception ex)
+        {
+            // 异步记录失败日志
             _ = Task.Run(() =>
             {
                 try
                 {
-                    log.DownloadTime = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
-                    log.Speed = log.DownloadTime > 0 ? log.BytesTransferred * 1000 / log.DownloadTime : 0;
-                    log.Insert();
+                    var errorLog = new DownloadLog
+                    {
+                        FileId = entry.Id,
+                        FileName = entry.Name,
+                        ProjectId = entry.ProjectId,
+                        AccessType = "Direct",
+                        ClientIp = clientIp,
+                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                        Success = false,
+                        FailReason = ex.Message,
+                        ResponseCode = 500,
+                        CreateTime = DateTime.Now
+                    };
+                    errorLog.Insert();
                 }
-                catch (Exception ex)
-                {
-                    XTrace.WriteException(ex);
-                }
-            });
-
-            return File(stream, contentType, entry.Name, enableRangeProcessing: true);
-        }
-        catch (Exception ex)
-        {
-            // 记录失败日志
-            var errorLog = new DownloadLog
-            {
-                FileId = entry.Id,
-                FileName = entry.Name,
-                ProjectId = entry.ProjectId,
-                AccessType = "Direct",
-                ClientIp = clientIp,
-                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                Success = false,
-                FailReason = ex.Message,
-                ResponseCode = 500,
-                CreateTime = DateTime.Now
-            };
-
-            _ = Task.Run(() =>
-            {
-                try { errorLog.Insert(); }
                 catch { }
             });
 
