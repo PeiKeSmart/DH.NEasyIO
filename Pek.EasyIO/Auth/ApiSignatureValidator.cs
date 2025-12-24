@@ -90,18 +90,38 @@ public class ApiSignatureValidator
             return result;
         }
 
-        // 4. 读取请求体（用于签名）
-        String body = null;
-        if (request.ContentLength > 0)
+        // 4. 读取请求体或文件哈希（用于签名）
+        String bodyHash = "";
+        
+        // 对于 multipart/form-data（文件上传），使用上传文件的 MD5 哈希
+        if (request.ContentType != null && request.ContentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase))
         {
+            // 尝试从 form 中获取文件并计算哈希
+            if (request.HasFormContentType && request.Form.Files.Count > 0)
+            {
+                var file = request.Form.Files[0];  // 获取第一个文件
+                if (file != null && file.Length > 0)
+                {
+                    using var stream = file.OpenReadStream();
+                    using var md5 = MD5.Create();
+                    var hash = await md5.ComputeHashAsync(stream);
+                    bodyHash = BitConverter.ToString(hash).Replace("-", "").ToLower();
+                    XTrace.WriteLine($"文件上传签名验证，使用文件哈希：{bodyHash}, 文件名：{file.FileName}, 大小：{file.Length:N0} 字节");
+                }
+            }
+        }
+        else if (request.ContentLength > 0)
+        {
+            // 对于其他请求（JSON 等），使用完整请求体
             request.EnableBuffering();
             using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
-            body = await reader.ReadToEndAsync();
+            var body = await reader.ReadToEndAsync();
             request.Body.Position = 0;
+            bodyHash = body ?? "";
         }
 
         // 5. 生成签名字符串
-        var signString = BuildSignString(request.Method, request.Path, request.QueryString.Value, body, timestamp);
+        var signString = BuildSignString(request.Method, request.Path, request.QueryString.Value, bodyHash, timestamp);
 
         // 6. 计算期望的签名
         var expectedSignature = ComputeSignature(signString, project.ApiSecret);
@@ -126,18 +146,19 @@ public class ApiSignatureValidator
     /// <param name="method">HTTP方法</param>
     /// <param name="path">路径</param>
     /// <param name="query">查询参数</param>
-    /// <param name="body">请求体</param>
+    /// <param name="bodyHashOrContent">请求体内容或文件哈希（文件上传时为 MD5 哈希，其他请求为完整内容）</param>
     /// <param name="timestamp">时间戳</param>
     /// <returns></returns>
-    public String BuildSignString(String method, String path, String query, String body, String timestamp)
+    public String BuildSignString(String method, String path, String query, String bodyHashOrContent, String timestamp)
     {
-        // 签名格式：Method\nPath\nQuery\nBody\nTimestamp
+        // 签名格式：Method\nPath\nQuery\nBodyHashOrContent\nTimestamp
+        // 注意：对于文件上传，bodyHashOrContent 是文件的 MD5 哈希（32字符），而非完整文件内容
         var parts = new[]
         {
             method?.ToUpper() ?? "",
             path ?? "",
             SortQueryString(query),
-            body ?? "",
+            bodyHashOrContent ?? "",
             timestamp ?? ""
         };
 

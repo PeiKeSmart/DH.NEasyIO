@@ -52,7 +52,7 @@ class Program
             Console.WriteLine("\n【2】上传文件");
             var uploadResult = await client.UploadFileAsync(
                 localFilePath: testFilePath,
-                remotePath: "test/demo/test.txt",
+                remark: "测试文件 - 2025年度",
                 category: "测试",
                 businessType: "Demo",
                 businessId: "123",
@@ -65,11 +65,12 @@ class Program
             Console.WriteLine($"  原始名: {uploadResult.OriginalName}");
             Console.WriteLine($"  大小: {uploadResult.Length} 字节");
             Console.WriteLine($"  哈希: {uploadResult.Hash}");
+            Console.WriteLine($"  备注: {uploadResult.Remark}");
             Console.WriteLine($"  重复: {uploadResult.Duplicate}");
 
             // 3. 下载文件
             Console.WriteLine("\n\n【3】下载文件");
-            await client.DownloadFileAsync("test/demo/test.txt", downloadPath);
+            await client.DownloadFileAsync(uploadResult.Id, downloadPath);
 
             // 4. 验证文件内容
             Console.WriteLine("\n【4】验证文件内容");
@@ -89,7 +90,8 @@ class Program
             Console.WriteLine("\n\n【5】测试文件去重");
             var uploadResult2 = await client.UploadFileAsync(
                 localFilePath: testFilePath,
-                remotePath: "test/demo/test2.txt",
+                remark: "测试文件 - 重复上传",
+                category: "测试",
                 isPublic: false
             );
 
@@ -98,7 +100,7 @@ class Program
 
             // 6. 删除文件
             Console.WriteLine("\n\n【6】删除文件");
-            var deleteSuccess = await client.DeleteFileAsync("test/demo/test.txt");
+            var deleteSuccess = await client.DeleteFileAsync(uploadResult.Id);
             Console.WriteLine($"  删除结果: {(deleteSuccess ? "成功" : "失败")}");
 
             Console.WriteLine("\n\n=== 所有测试完成 ===");

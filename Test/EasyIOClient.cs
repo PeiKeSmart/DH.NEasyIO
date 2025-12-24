@@ -30,53 +30,59 @@ public class EasyIOClient
 
     /// <summary>上传文件</summary>
     /// <param name="localFilePath">本地文件路径</param>
-    /// <param name="remotePath">远程文件路径（如：users/avatar.jpg）</param>
+    /// <param name="remark">备注说明（必填）</param>
     /// <param name="category">分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
     /// <param name="isPublic">是否公开</param>
     /// <returns></returns>
-    public async Task<UploadResult> UploadFileAsync(String localFilePath, String remotePath,
+    public async Task<UploadResult> UploadFileAsync(String localFilePath, String remark,
         String category = null, String businessType = null, String businessId = null, bool isPublic = false)
     {
-        Console.WriteLine($"开始上传文件：{localFilePath} -> {remotePath}");
+        Console.WriteLine($"开始上传文件：{localFilePath}");
 
         // 1. 读取文件
         if (!File.Exists(localFilePath))
             throw new FileNotFoundException("文件不存在", localFilePath);
 
         var fileBytes = await File.ReadAllBytesAsync(localFilePath);
-        Console.WriteLine($"文件大小：{fileBytes.Length:N0} 字节");
+        var fileName = Path.GetFileName(localFilePath);
+        Console.WriteLine($"文件名：{fileName}，大小：{fileBytes.Length:N0} 字节");
 
-        // 2. 构建URL
-        var path = $"/api/v1/io/{remotePath}";
-        var queryParams = new List<String>();
-        if (!String.IsNullOrEmpty(category)) queryParams.Add($"category={category}");
-        if (!String.IsNullOrEmpty(businessType)) queryParams.Add($"businessType={businessType}");
-        if (!String.IsNullOrEmpty(businessId)) queryParams.Add($"businessId={businessId}");
-        queryParams.Add($"isPublic={isPublic}");
+        // 2. 构建 URL
+        var path = "/api/v1/io";
+        var url = $"{_baseUrl}{path}";
 
-        var queryString = String.Join("&", queryParams);
-        var url = $"{_baseUrl}{path}?{queryString}";
+        // 3. 计算文件哈希（用于签名，避免大文件内存问题）
+        var fileHash = await CalculateFileHashAsync(localFilePath);
+        Console.WriteLine($"文件哈希：{fileHash}");
 
-        // 3. 生成签名
+        // 4. 构建 multipart/form-data
+        var formData = new MultipartFormDataContent();
+        formData.Add(new ByteArrayContent(fileBytes), "file", fileName);
+        formData.Add(new StringContent(remark), "remark");
+        if (!String.IsNullOrEmpty(category)) formData.Add(new StringContent(category), "category");
+        if (!String.IsNullOrEmpty(businessType)) formData.Add(new StringContent(businessType), "businessType");
+        if (!String.IsNullOrEmpty(businessId)) formData.Add(new StringContent(businessId), "businessId");
+        formData.Add(new StringContent(isPublic.ToString().ToLower()), "isPublic");
+
+        // 5. 生成签名（使用文件哈希）
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-        var signature = GenerateSignature("PUT", path, queryString, fileBytes, timestamp);
+        var signature = GenerateSignature("PUT", path, "", fileHash, timestamp);
 
         Console.WriteLine($"签名信息：");
         Console.WriteLine($"  ProjectCode: {_projectCode}");
         Console.WriteLine($"  Timestamp: {timestamp}");
         Console.WriteLine($"  Signature: {signature}");
 
-        // 4. 构建请求
+        // 5. 构建请求
         var request = new HttpRequestMessage(HttpMethod.Put, url);
         request.Headers.Add("X-Project-Code", _projectCode);
         request.Headers.Add("X-Timestamp", timestamp);
         request.Headers.Add("X-Signature", signature);
-        request.Content = new ByteArrayContent(fileBytes);
-        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        request.Content = formData;
 
-        // 5. 发送请求
+        // 6. 发送请求
         var response = await _httpClient.SendAsync(request);
         var result = await response.Content.ReadAsStringAsync();
 
@@ -88,22 +94,30 @@ public class EasyIOClient
         }
 
         Console.WriteLine($"上传成功：{result}");
-        return System.Text.Json.JsonSerializer.Deserialize<UploadResult>(result);
+        
+        // JSON 反序列化选项（API 返回 camelCase，C# 模型使用 PascalCase）
+        var options = new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        return System.Text.Json.JsonSerializer.Deserialize<UploadResult>(result, options);
     }
 
     /// <summary>下载文件</summary>
-    /// <param name="remotePath">远程文件路径</param>
+    /// <param name="fileId">文件数据库ID</param>
     /// <param name="saveToPath">保存到本地路径（可选）</param>
+    /// <param name="inline">是否内联显示（预览）</param>
     /// <returns></returns>
-    public async Task<Byte[]> DownloadFileAsync(String remotePath, String saveToPath = null)
+    public async Task<Byte[]> DownloadFileAsync(Int64 fileId, String saveToPath = null, bool inline = false)
     {
-        Console.WriteLine($"开始下载文件：{remotePath}");
+        Console.WriteLine($"开始下载文件：ID={fileId}");
 
-        var path = $"/api/v1/io/{remotePath}";
-        var url = $"{_baseUrl}{path}";
+        var path = $"/api/v1/io/{fileId}";
+        var queryString = inline ? "inline=true" : "";
+        var url = $"{_baseUrl}{path}" + (String.IsNullOrEmpty(queryString) ? "" : $"?{queryString}");
 
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-        var signature = GenerateSignature("GET", path, "", null, timestamp);
+        var signature = GenerateSignature("GET", path, queryString, "", timestamp);
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add("X-Project-Code", _projectCode);
@@ -131,17 +145,20 @@ public class EasyIOClient
     }
 
     /// <summary>删除文件</summary>
-    /// <param name="remotePath">远程文件路径</param>
+    /// <param name="fileId">文件数据库ID</param>
     /// <returns></returns>
-    public async Task<Boolean> DeleteFileAsync(String remotePath)
+    public async Task<Boolean> DeleteFileAsync(Int64 fileId)
     {
-        Console.WriteLine($"开始删除文件：{remotePath}");
+        Console.WriteLine($"开始删除文件：ID={fileId}");
 
-        var path = $"/api/v1/io/{remotePath}";
-        var url = $"{_baseUrl}{path}";
+        // DELETE /api/v1/io?id={fileId}
+        // ASP.NET Core 会自动将查询参数 id 绑定到 Delete(Int64 id) 方法参数
+        var path = "/api/v1/io";
+        var queryString = $"id={fileId}";
+        var url = $"{_baseUrl}{path}?{queryString}";
 
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-        var signature = GenerateSignature("DELETE", path, "", null, timestamp);
+        var signature = GenerateSignature("DELETE", path, queryString, "", timestamp);
 
         var request = new HttpRequestMessage(HttpMethod.Delete, url);
         request.Headers.Add("X-Project-Code", _projectCode);
@@ -162,11 +179,11 @@ public class EasyIOClient
     }
 
     /// <summary>生成API签名</summary>
-    private String GenerateSignature(String method, String path, String query, Byte[] body, String timestamp)
+    private String GenerateSignature(String method, String path, String query, String bodyHash, String timestamp)
     {
-        // 1. 构建签名字符串
-        var bodyStr = body != null && body.Length > 0 ? Convert.ToBase64String(body) : "";
-        var signString = $"{method}\n{path}\n{SortQuery(query)}\n{bodyStr}\n{timestamp}";
+        // 使用文件哈希代替完整内容，避免大文件内存和性能问题
+        // bodyHash: 文件的 MD5/SHA256 哈希（32/64字符），而非整个文件的 Base64（可能几百MB）
+        var signString = $"{method}\n{path}\n{SortQuery(query)}\n{bodyHash}\n{timestamp}";
 
         // 调试输出
         //Console.WriteLine($"SignString: {signString.Replace("\n", "\\n")}");
@@ -174,6 +191,17 @@ public class EasyIOClient
         // 2. 计算HMAC-SHA256
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_apiSecret));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(signString));
+        return BitConverter.ToString(hash).Replace("-", "").ToLower();
+    }
+
+    /// <summary>计算文件哈希（流式处理，节省内存）</summary>
+    /// <param name="filePath">文件路径</param>
+    /// <returns>MD5 哈希值（小写十六进制）</returns>
+    private async Task<String> CalculateFileHashAsync(String filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        using var md5 = MD5.Create();
+        var hash = await md5.ComputeHashAsync(stream);
         return BitConverter.ToString(hash).Replace("-", "").ToLower();
     }
 
@@ -201,5 +229,6 @@ public class UploadResult
     public Int64 ProjectId { get; set; }
     public String Category { get; set; }
     public Boolean IsPublic { get; set; }
+    public String Remark { get; set; }
     public Boolean Duplicate { get; set; }
 }
