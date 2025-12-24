@@ -124,14 +124,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     [BindColumn("IsPublic", "是否公开", "")]
     public Boolean IsPublic { get => _IsPublic; set { if (OnPropertyChanging("IsPublic", value)) { _IsPublic = value; OnPropertyChanged("IsPublic"); } } }
 
-    private Int32 _MaxDownloads;
-    /// <summary>最大下载次数（0=不限制）</summary>
-    [DisplayName("最大下载次数（0=不限制）")]
-    [Description("最大下载次数（0=不限制）")]
-    [DataObjectField(false, false, false, 0)]
-    [BindColumn("MaxDownloads", "最大下载次数（0=不限制）", "")]
-    public Int32 MaxDownloads { get => _MaxDownloads; set { if (OnPropertyChanging("MaxDownloads", value)) { _MaxDownloads = value; OnPropertyChanged("MaxDownloads"); } } }
-
     private Int32 _DownloadCount;
     /// <summary>已下载次数</summary>
     [DisplayName("已下载次数")]
@@ -374,7 +366,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         BucketName = model.BucketName;
         AccessLevel = model.AccessLevel;
         IsPublic = model.IsPublic;
-        MaxDownloads = model.MaxDownloads;
         DownloadCount = model.DownloadCount;
         ExpiresAt = model.ExpiresAt;
         ProjectId = model.ProjectId;
@@ -426,7 +417,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
             "BucketName" => _BucketName,
             "AccessLevel" => _AccessLevel,
             "IsPublic" => _IsPublic,
-            "MaxDownloads" => _MaxDownloads,
             "DownloadCount" => _DownloadCount,
             "ExpiresAt" => _ExpiresAt,
             "ProjectId" => _ProjectId,
@@ -473,7 +463,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
                 case "BucketName": _BucketName = Convert.ToString(value); break;
                 case "AccessLevel": _AccessLevel = value.ToInt(); break;
                 case "IsPublic": _IsPublic = value.ToBoolean(); break;
-                case "MaxDownloads": _MaxDownloads = value.ToInt(); break;
                 case "DownloadCount": _DownloadCount = value.ToInt(); break;
                 case "ExpiresAt": _ExpiresAt = value.ToDateTime(); break;
                 case "ProjectId": _ProjectId = value.ToLong(); break;
@@ -620,9 +609,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         /// <summary>是否公开</summary>
         public static readonly Field IsPublic = FindByName("IsPublic");
 
-        /// <summary>最大下载次数（0=不限制）</summary>
-        public static readonly Field MaxDownloads = FindByName("MaxDownloads");
-
         /// <summary>已下载次数</summary>
         public static readonly Field DownloadCount = FindByName("DownloadCount");
 
@@ -748,9 +734,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>是否公开</summary>
         public const String IsPublic = "IsPublic";
-
-        /// <summary>最大下载次数（0=不限制）</summary>
-        public const String MaxDownloads = "MaxDownloads";
 
         /// <summary>已下载次数</summary>
         public const String DownloadCount = "DownloadCount";

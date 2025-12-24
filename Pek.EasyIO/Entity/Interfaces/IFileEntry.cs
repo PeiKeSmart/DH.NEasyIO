@@ -47,9 +47,6 @@ public partial interface IFileEntry
     /// <summary>是否公开</summary>
     Boolean IsPublic { get; set; }
 
-    /// <summary>最大下载次数（0=不限制）</summary>
-    Int32 MaxDownloads { get; set; }
-
     /// <summary>已下载次数</summary>
     Int32 DownloadCount { get; set; }
 

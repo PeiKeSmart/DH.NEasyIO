@@ -316,9 +316,7 @@ public class IOController : ApiControllerBase
         if (effectiveAccessLevel == 3 && project?.Id != entry.ProjectId)
             throw new Exception("内部文件仅限同项目访问");
 
-        // 4. 业务规则验证（合并检查）
-        if (entry.MaxDownloads > 0 && entry.DownloadCount >= entry.MaxDownloads)
-            throw new Exception($"文件下载次数已达上限（{entry.MaxDownloads}）");
+        // 4. 业务规则验证
         if (entry.ExpiresAt != DateTime.MinValue && entry.ExpiresAt < DateTime.Now)
             throw new Exception("文件已过期");
 
