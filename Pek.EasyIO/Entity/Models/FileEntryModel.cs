@@ -50,9 +50,6 @@ public partial class FileEntryModel
     /// <summary>已下载次数</summary>
     public Int32 DownloadCount { get; set; }
 
-    /// <summary>过期时间</summary>
-    public DateTime ExpiresAt { get; set; }
-
     /// <summary>所属项目ID</summary>
     public Int64 ProjectId { get; set; }
 
@@ -150,7 +147,6 @@ public partial class FileEntryModel
         AccessLevel = model.AccessLevel;
         IsPublic = model.IsPublic;
         DownloadCount = model.DownloadCount;
-        ExpiresAt = model.ExpiresAt;
         ProjectId = model.ProjectId;
         ProjectName = model.ProjectName;
         Category = model.Category;

@@ -316,11 +316,7 @@ public class IOController : ApiControllerBase
         if (effectiveAccessLevel == 3 && project?.Id != entry.ProjectId)
             throw new Exception("内部文件仅限同项目访问");
 
-        // 4. 业务规则验证
-        if (entry.ExpiresAt != DateTime.MinValue && entry.ExpiresAt < DateTime.Now)
-            throw new Exception("文件已过期");
-
-        // 5. HTTP 缓存验证（优化字符串操作）
+        // 4. HTTP 缓存验证（优化字符串操作）
         var etag = $"\"{entry.Hash}-{lastModified.Ticks}\"";
         var requestETag = Request.Headers["If-None-Match"].ToString();
         

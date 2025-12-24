@@ -50,9 +50,6 @@ public partial interface IFileEntry
     /// <summary>已下载次数</summary>
     Int32 DownloadCount { get; set; }
 
-    /// <summary>过期时间</summary>
-    DateTime ExpiresAt { get; set; }
-
     /// <summary>所属项目ID</summary>
     Int64 ProjectId { get; set; }
 

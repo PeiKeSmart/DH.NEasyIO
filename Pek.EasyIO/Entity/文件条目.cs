@@ -132,14 +132,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     [BindColumn("DownloadCount", "已下载次数", "")]
     public Int32 DownloadCount { get => _DownloadCount; set { if (OnPropertyChanging("DownloadCount", value)) { _DownloadCount = value; OnPropertyChanged("DownloadCount"); } } }
 
-    private DateTime _ExpiresAt;
-    /// <summary>过期时间</summary>
-    [DisplayName("过期时间")]
-    [Description("过期时间")]
-    [DataObjectField(false, false, true, 0)]
-    [BindColumn("ExpiresAt", "过期时间", "")]
-    public DateTime ExpiresAt { get => _ExpiresAt; set { if (OnPropertyChanging("ExpiresAt", value)) { _ExpiresAt = value; OnPropertyChanged("ExpiresAt"); } } }
-
     private Int64 _ProjectId;
     /// <summary>所属项目ID</summary>
     [DisplayName("所属项目ID")]
@@ -367,7 +359,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         AccessLevel = model.AccessLevel;
         IsPublic = model.IsPublic;
         DownloadCount = model.DownloadCount;
-        ExpiresAt = model.ExpiresAt;
         ProjectId = model.ProjectId;
         ProjectName = model.ProjectName;
         Category = model.Category;
@@ -418,7 +409,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
             "AccessLevel" => _AccessLevel,
             "IsPublic" => _IsPublic,
             "DownloadCount" => _DownloadCount,
-            "ExpiresAt" => _ExpiresAt,
             "ProjectId" => _ProjectId,
             "ProjectName" => _ProjectName,
             "Category" => _Category,
@@ -464,7 +454,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
                 case "AccessLevel": _AccessLevel = value.ToInt(); break;
                 case "IsPublic": _IsPublic = value.ToBoolean(); break;
                 case "DownloadCount": _DownloadCount = value.ToInt(); break;
-                case "ExpiresAt": _ExpiresAt = value.ToDateTime(); break;
                 case "ProjectId": _ProjectId = value.ToLong(); break;
                 case "ProjectName": _ProjectName = Convert.ToString(value); break;
                 case "Category": _Category = Convert.ToString(value); break;
@@ -612,9 +601,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         /// <summary>已下载次数</summary>
         public static readonly Field DownloadCount = FindByName("DownloadCount");
 
-        /// <summary>过期时间</summary>
-        public static readonly Field ExpiresAt = FindByName("ExpiresAt");
-
         /// <summary>所属项目ID</summary>
         public static readonly Field ProjectId = FindByName("ProjectId");
 
@@ -737,9 +723,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>已下载次数</summary>
         public const String DownloadCount = "DownloadCount";
-
-        /// <summary>过期时间</summary>
-        public const String ExpiresAt = "ExpiresAt";
 
         /// <summary>所属项目ID</summary>
         public const String ProjectId = "ProjectId";
