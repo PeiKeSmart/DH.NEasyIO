@@ -45,22 +45,35 @@ public class IOController : ApiControllerBase
     }
 
     /// <summary>上传文件对象</summary>
-    /// <param name="id">文件名称。可包含路径</param>
+    /// <param name="file">上传的文件</param>
+    /// <param name="id">文件名称。可包含路径（可选，不指定则使用上传文件的原始名称）</param>
     /// <param name="category">文件分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
     /// <param name="isPublic">是否公开（可选）</param>
     /// <returns></returns>
     [HttpPut]
-    public async Task<Object> Put([FromForm] String id, [FromForm] String category = null,
+    public async Task<Object> Put(IFormFile file, [FromForm] String id = null, [FromForm] String category = null,
         [FromForm] String businessType = null, [FromForm] String businessId = null, [FromForm] Boolean isPublic = false)
     {
         var result = new DGResult();
 
+        // 验证是否上传了文件
+        if (file == null || file.Length == 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "未上传文件或文件为空";
+            return result;
+        }
+
+        // 如果未指定文件名，使用上传文件的原始名称
+        if (id.IsNullOrEmpty())
+            id = file.FileName;
+
         if (id.IsNullOrEmpty())
         {
             result.ErrCode = 10000;
-            result.Message = GetResource("参数不能为空");
+            result.Message = GetResource("文件名不能为空");
             return result;
         }
 
@@ -78,11 +91,11 @@ public class IOController : ApiControllerBase
         var fileName = GetProjectFilePath(project, id);
         fileName.EnsureDirectory(true);
 
-        var ms = Request.Body;
         String hash;
         Int64 fileSize;
 
-        using (var fs = new FileStream(fileName, FileMode.OpenOrCreate))
+        using (var uploadStream = file.OpenReadStream())
+        using (var fs = new FileStream(fileName, FileMode.Create))
         {
             // 计算哈希的同时保存文件
             using var md5 = MD5.Create();
@@ -90,7 +103,7 @@ public class IOController : ApiControllerBase
             Int32 bytesRead;
             fileSize = 0;
 
-            while ((bytesRead = await ms.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            while ((bytesRead = await uploadStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
             {
                 await fs.WriteAsync(buffer, 0, bytesRead);
                 md5.TransformBlock(buffer, 0, bytesRead, buffer, 0);
@@ -99,7 +112,6 @@ public class IOController : ApiControllerBase
 
             md5.TransformFinalBlock(buffer, 0, 0);
             hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
-            fs.SetLength(fileSize);
         }
 
         // 验证文件大小
