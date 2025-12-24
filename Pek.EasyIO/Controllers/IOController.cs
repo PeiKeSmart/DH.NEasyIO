@@ -37,9 +37,9 @@ public class IOController : ApiControllerBase
         if (storageRoot.IsNullOrEmpty())
             throw new Exception($"项目 [{project.Name}] 未配置存储目录，请在项目设置中指定 StoragePath");
 
-        // 检查目录是否存在
+        // 自动创建目录（如果不存在）
         if (!Directory.Exists(storageRoot))
-            throw new DirectoryNotFoundException($"项目 [{project.Name}] 的存储目录不存在：{storageRoot}");
+            Directory.CreateDirectory(storageRoot);
 
         return Path.Combine(storageRoot, relativePath).GetFullPath();
     }
