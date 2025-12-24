@@ -35,11 +35,8 @@ public partial class FileEntryModel
     /// <summary>存储类型（Local/OSS/S3）</summary>
     public String? StorageType { get; set; }
 
-    /// <summary>存储路径</summary>
-    public String StoragePath { get; set; } = null!;
-
-    /// <summary>相对路径</summary>
-    public String? RelativePath { get; set; }
+    /// <summary>相对于项目存储目录的路径</summary>
+    public String RelativePath { get; set; } = null!;
 
     /// <summary>存储桶名称</summary>
     public String? BucketName { get; set; }
@@ -154,7 +151,6 @@ public partial class FileEntryModel
         Size = model.Size;
         Hash = model.Hash;
         StorageType = model.StorageType;
-        StoragePath = model.StoragePath;
         RelativePath = model.RelativePath;
         BucketName = model.BucketName;
         AccessLevel = model.AccessLevel;

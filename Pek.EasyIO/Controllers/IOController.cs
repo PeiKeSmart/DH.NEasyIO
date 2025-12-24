@@ -26,7 +26,23 @@ public class IOController : ApiControllerBase
     /// <summary>实例化文件控制器</summary>
     public IOController() => _storageService = new LocalFileStorageService();
 
-    private String GetPath(String id) => EasyIOSetting.Current.Path.CombinePath(id).GetFullPath();
+    /// <summary>获取项目文件的存储路径</summary>
+    /// <param name="project">文件项目</param>
+    /// <param name="relativePath">相对路径</param>
+    /// <returns></returns>
+    private String GetProjectFilePath(FileProject project, String relativePath)
+    {
+        // 强制要求项目必须配置存储目录
+        var storageRoot = project.StoragePath;
+        if (storageRoot.IsNullOrEmpty())
+            throw new Exception($"项目 [{project.Name}] 未配置存储目录，请在项目设置中指定 StoragePath");
+
+        // 检查目录是否存在
+        if (!Directory.Exists(storageRoot))
+            throw new DirectoryNotFoundException($"项目 [{project.Name}] 的存储目录不存在：{storageRoot}");
+
+        return Path.Combine(storageRoot, relativePath).GetFullPath();
+    }
 
     /// <summary>上传文件对象</summary>
     /// <param name="id">文件名称。可包含路径</param>
@@ -58,8 +74,8 @@ public class IOController : ApiControllerBase
         if (!ValidateExtension(ext, project))
             throw new Exception($"不支持的文件类型：{ext}");
 
-        // 保存文件到磁盘
-        var fileName = GetPath(id);
+        // 保存文件到项目存储目录
+        var fileName = GetProjectFilePath(project, id);
         fileName.EnsureDirectory(true);
 
         var ms = Request.Body;
@@ -127,8 +143,7 @@ public class IOController : ApiControllerBase
                 Hash = hash,
 
                 StorageType = "Local",
-                StoragePath = fileName,
-                RelativePath = id,
+                RelativePath = id,  // 相对于项目存储目录的路径
 
                 AccessLevel = isPublic ? 1 : project.DefaultAccessLevel,
                 IsPublic = isPublic,
@@ -207,16 +222,21 @@ public class IOController : ApiControllerBase
                 throw new Exception("私有文件需要项目鉴权");
         }
 
-        // 5. 检查文件是否存在
-        var filePath = entry.StoragePath;
+        // 5. 查询文件所属项目（用于获取存储目录）
+        var fileProject = FileProject.FindById(entry.ProjectId);
+        if (fileProject == null)
+            throw new Exception("文件所属项目不存在");
+
+        // 6. 组合完整文件路径
+        var filePath = GetProjectFilePath(fileProject, entry.RelativePath);
         if (!System.IO.File.Exists(filePath))
             throw new Exception("物理文件不存在");
 
-        // 6. 检查下载次数限制
+        // 7. 检查下载次数限制
         if (entry.MaxDownloads > 0 && entry.DownloadCount >= entry.MaxDownloads)
             throw new Exception($"文件下载次数已达上限（{entry.MaxDownloads}）");
 
-        // 7. 检查过期时间（DateTime.MinValue 表示永久有效）
+        // 8. 检查过期时间（DateTime.MinValue 表示永久有效）
         if (entry.ExpiresAt != DateTime.MinValue && entry.ExpiresAt < DateTime.Now)
             throw new Exception("文件已过期");
 
@@ -224,11 +244,11 @@ public class IOController : ApiControllerBase
 
         try
         {
-            // 8. 更新下载计数
+            // 9. 更新下载计数
             entry.DownloadCount++;
             entry.Update();
 
-            // 9. 记录下载日志
+            // 10. 记录下载日志
             var log = new DownloadLog
             {
                 FileId = entry.Id,
@@ -244,7 +264,7 @@ public class IOController : ApiControllerBase
                 CreateTime = DateTime.Now
             };
 
-            // 10. 返回文件流
+            // 11. 返回文件流
             var stream = System.IO.File.OpenRead(filePath);
             var contentType = entry.ContentType ?? "application/octet-stream";
 
@@ -308,111 +328,47 @@ public class IOController : ApiControllerBase
     {
         if (id.IsNullOrEmpty()) throw new Exception("找不到记录！id=" + id);
 
-        var fileName = GetPath(id);
-        var fi = fileName.AsFile();
-        if (!fi.Exists) throw new Exception("文件不存在");
-
-        //todo 实现计算Url
-        throw new NotImplementedException();
+        // TODO: 此方法已废弃，应使用基于数据库 ID 的下载方式
+        throw new NotImplementedException("此方法已废弃，请使用 Get(Int64 id) 方法");
     }
 
     /// <summary>删除文件对象</summary>
-    /// <param name="id"></param>
+    /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
     [HttpDelete]
-    public Int32 Delete(String id)
+    public Int32 Delete(Int64 id)
     {
-        if (id.IsNullOrEmpty()) throw new Exception("找不到记录！id=" + id);
+        if (id <= 0) throw new Exception("无效的文件ID：" + id);
 
-        var path = GetPath(id);
-        if (path.EndsWith('/') || path.EndsWith('\\'))
+        var entry = FileEntry.FindById(id);
+        if (entry == null) throw new Exception("文件记录不存在");
+
+        var project = FileProject.FindById(entry.ProjectId);
+        if (project == null) throw new Exception("文件所属项目不存在");
+
+        var filePath = GetProjectFilePath(project, entry.RelativePath);
+        if (System.IO.File.Exists(filePath))
         {
-            var di = path.AsDirectory();
-            if (!di.Exists) return 0;
-
-            di.Delete();
-
-            return 1;
+            System.IO.File.Delete(filePath);
         }
-        else
-        {
-            var fi = path.AsFile();
-            if (!fi.Exists) return 0;
 
-            fi.Delete();
-
-            return 1;
-        }
+        // 删除数据库记录
+        entry.Delete();
+        
+        return 1;
     }
 
-    /// <summary>搜索文件</summary>
+    /// <summary>搜索文件（已废弃，使用数据库查询代替）</summary>
     /// <param name="pattern">匹配模式。如/202304/*.jpg</param>
     /// <param name="start">开始序号。0开始</param>
     /// <param name="count">最大个数</param>
     /// <returns></returns>
     [HttpGet]
+    [Obsolete("已废弃，请使用 FileEntry.Search 方法查询数据库")]
     public virtual IList<Object> Search(String pattern, Int32 start, Int32 count)
     {
-        //if (searchPattern.IsNullOrEmpty()) throw new ArgumentNullException(nameof(searchPattern));
-        // 强制count默认值为100
-        if (count <= 0) count = 100;
-        if (start <= 0) start = 0;
-
-        var dir = "";
-        var pt = "*";
-        if (!pattern.IsNullOrEmpty())
-        {
-            var p = pattern.LastIndexOfAny(new[] { '/', '\\' });
-            if (p >= 0 && pattern[(p + 1)..].Contains('*'))
-            {
-                dir = pattern[..p];
-                pt = pattern[(p + 1)..];
-            }
-            else
-            {
-                dir = pattern;
-            }
-        }
-
-        var di = EasyIOSetting.Current.Path.CombinePath(dir).AsDirectory();
-        if (!di.Exists) return null;
-
-        var root = EasyIOSetting.Current.Path.EnsureEnd("/").GetFullPath();
-        var rs = new List<Object>();
-
-        // 子目录列表
-        var dis = di.GetDirectories(pt);
-        if (dis.Length > 0)
-        {
-            foreach (var item in dis.Skip(start).Take(count))
-            {
-                rs.Add(new
-                {
-                    name = item.FullName.TrimStart(root).Replace('\\', '/'),
-                    time = item.LastWriteTime
-                });
-            }
-            start += dis.Length;
-            count -= rs.Count;
-        }
-        if (count == 0) return rs;
-
-        // 文件列表
-        var fis = di.GetFiles(pt);
-        if (fis.Length > 0)
-        {
-            foreach (var item in fis.Skip(start).Take(count))
-            {
-                rs.Add(new
-                {
-                    name = item.FullName.TrimStart(root).Replace('\\', '/'),
-                    time = item.LastWriteTime
-                });
-            }
-        }
-
-        return rs;
+        throw new NotSupportedException("此方法已废弃，请通过 FileEntry 实体查询数据库，每个项目必须配置存储目录");
     }
 
     #region 辅助方法

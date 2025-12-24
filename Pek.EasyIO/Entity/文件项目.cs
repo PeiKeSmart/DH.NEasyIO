@@ -55,6 +55,14 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
     [BindColumn("Description", "项目描述", "")]
     public String? Description { get => _Description; set { if (OnPropertyChanging("Description", value)) { _Description = value; OnPropertyChanged("Description"); } } }
 
+    private String? _StoragePath;
+    /// <summary>存储根目录（相对或绝对路径）</summary>
+    [DisplayName("存储根目录（相对或绝对路径）")]
+    [Description("存储根目录（相对或绝对路径）")]
+    [DataObjectField(false, false, true, 500)]
+    [BindColumn("StoragePath", "存储根目录（相对或绝对路径）", "")]
+    public String? StoragePath { get => _StoragePath; set { if (OnPropertyChanging("StoragePath", value)) { _StoragePath = value; OnPropertyChanged("StoragePath"); } } }
+
     private String? _ApiSecret;
     /// <summary>API密钥</summary>
     [DisplayName("API密钥")]
@@ -169,6 +177,7 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         Code = model.Code;
         Name = model.Name;
         Description = model.Description;
+        StoragePath = model.StoragePath;
         ApiSecret = model.ApiSecret;
         MaxStorageSize = model.MaxStorageSize;
         UsedStorageSize = model.UsedStorageSize;
@@ -197,6 +206,7 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
             "Code" => _Code,
             "Name" => _Name,
             "Description" => _Description,
+            "StoragePath" => _StoragePath,
             "ApiSecret" => _ApiSecret,
             "MaxStorageSize" => _MaxStorageSize,
             "UsedStorageSize" => _UsedStorageSize,
@@ -220,6 +230,7 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
                 case "Code": _Code = Convert.ToString(value); break;
                 case "Name": _Name = Convert.ToString(value); break;
                 case "Description": _Description = Convert.ToString(value); break;
+                case "StoragePath": _StoragePath = Convert.ToString(value); break;
                 case "ApiSecret": _ApiSecret = Convert.ToString(value); break;
                 case "MaxStorageSize": _MaxStorageSize = value.ToLong(); break;
                 case "UsedStorageSize": _UsedStorageSize = value.ToLong(); break;
@@ -311,6 +322,9 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         /// <summary>项目描述</summary>
         public static readonly Field Description = FindByName("Description");
 
+        /// <summary>存储根目录（相对或绝对路径）</summary>
+        public static readonly Field StoragePath = FindByName("StoragePath");
+
         /// <summary>API密钥</summary>
         public static readonly Field ApiSecret = FindByName("ApiSecret");
 
@@ -367,6 +381,9 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
 
         /// <summary>项目描述</summary>
         public const String Description = "Description";
+
+        /// <summary>存储根目录（相对或绝对路径）</summary>
+        public const String StoragePath = "StoragePath";
 
         /// <summary>API密钥</summary>
         public const String ApiSecret = "ApiSecret";

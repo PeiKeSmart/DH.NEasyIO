@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Test;
 
@@ -32,7 +37,7 @@ public class EasyIOClient
     /// <param name="isPublic">是否公开</param>
     /// <returns></returns>
     public async Task<UploadResult> UploadFileAsync(String localFilePath, String remotePath,
-        String category = null, String businessType = null, String businessId = null, Boolean isPublic = false)
+        String category = null, String businessType = null, String businessId = null, bool isPublic = false)
     {
         Console.WriteLine($"开始上传文件：{localFilePath} -> {remotePath}");
 

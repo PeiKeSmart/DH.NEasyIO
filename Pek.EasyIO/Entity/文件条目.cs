@@ -91,21 +91,13 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     [BindColumn("StorageType", "存储类型（Local/OSS/S3）", "")]
     public String? StorageType { get => _StorageType; set { if (OnPropertyChanging("StorageType", value)) { _StorageType = value; OnPropertyChanged("StorageType"); } } }
 
-    private String _StoragePath = null!;
-    /// <summary>存储路径</summary>
-    [DisplayName("存储路径")]
-    [Description("存储路径")]
+    private String _RelativePath = null!;
+    /// <summary>相对于项目存储目录的路径</summary>
+    [DisplayName("相对于项目存储目录的路径")]
+    [Description("相对于项目存储目录的路径")]
     [DataObjectField(false, false, false, 500)]
-    [BindColumn("StoragePath", "存储路径", "")]
-    public String StoragePath { get => _StoragePath; set { if (OnPropertyChanging("StoragePath", value)) { _StoragePath = value; OnPropertyChanged("StoragePath"); } } }
-
-    private String? _RelativePath;
-    /// <summary>相对路径</summary>
-    [DisplayName("相对路径")]
-    [Description("相对路径")]
-    [DataObjectField(false, false, true, 500)]
-    [BindColumn("RelativePath", "相对路径", "")]
-    public String? RelativePath { get => _RelativePath; set { if (OnPropertyChanging("RelativePath", value)) { _RelativePath = value; OnPropertyChanged("RelativePath"); } } }
+    [BindColumn("RelativePath", "相对于项目存储目录的路径", "")]
+    public String RelativePath { get => _RelativePath; set { if (OnPropertyChanging("RelativePath", value)) { _RelativePath = value; OnPropertyChanged("RelativePath"); } } }
 
     private String? _BucketName;
     /// <summary>存储桶名称</summary>
@@ -385,7 +377,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         Size = model.Size;
         Hash = model.Hash;
         StorageType = model.StorageType;
-        StoragePath = model.StoragePath;
         RelativePath = model.RelativePath;
         BucketName = model.BucketName;
         AccessLevel = model.AccessLevel;
@@ -439,7 +430,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
             "Size" => _Size,
             "Hash" => _Hash,
             "StorageType" => _StorageType,
-            "StoragePath" => _StoragePath,
             "RelativePath" => _RelativePath,
             "BucketName" => _BucketName,
             "AccessLevel" => _AccessLevel,
@@ -488,7 +478,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
                 case "Size": _Size = value.ToLong(); break;
                 case "Hash": _Hash = Convert.ToString(value); break;
                 case "StorageType": _StorageType = Convert.ToString(value); break;
-                case "StoragePath": _StoragePath = Convert.ToString(value); break;
                 case "RelativePath": _RelativePath = Convert.ToString(value); break;
                 case "BucketName": _BucketName = Convert.ToString(value); break;
                 case "AccessLevel": _AccessLevel = value.ToInt(); break;
@@ -691,10 +680,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         /// <summary>存储类型（Local/OSS/S3）</summary>
         public static readonly Field StorageType = FindByName("StorageType");
 
-        /// <summary>存储路径</summary>
-        public static readonly Field StoragePath = FindByName("StoragePath");
-
-        /// <summary>相对路径</summary>
+        /// <summary>相对于项目存储目录的路径</summary>
         public static readonly Field RelativePath = FindByName("RelativePath");
 
         /// <summary>存储桶名称</summary>
@@ -826,10 +812,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         /// <summary>存储类型（Local/OSS/S3）</summary>
         public const String StorageType = "StorageType";
 
-        /// <summary>存储路径</summary>
-        public const String StoragePath = "StoragePath";
-
-        /// <summary>相对路径</summary>
+        /// <summary>相对于项目存储目录的路径</summary>
         public const String RelativePath = "RelativePath";
 
         /// <summary>存储桶名称</summary>

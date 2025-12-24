@@ -23,6 +23,9 @@ public partial class FileProjectModel
     /// <summary>项目描述</summary>
     public String? Description { get; set; }
 
+    /// <summary>存储根目录（相对或绝对路径）</summary>
+    public String? StoragePath { get; set; }
+
     /// <summary>API密钥</summary>
     public String? ApiSecret { get; set; }
 
@@ -72,6 +75,7 @@ public partial class FileProjectModel
         Code = model.Code;
         Name = model.Name;
         Description = model.Description;
+        StoragePath = model.StoragePath;
         ApiSecret = model.ApiSecret;
         MaxStorageSize = model.MaxStorageSize;
         UsedStorageSize = model.UsedStorageSize;

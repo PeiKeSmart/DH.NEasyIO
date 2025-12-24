@@ -35,11 +35,8 @@ public partial interface IFileEntry
     /// <summary>存储类型（Local/OSS/S3）</summary>
     String? StorageType { get; set; }
 
-    /// <summary>存储路径</summary>
-    String StoragePath { get; set; }
-
-    /// <summary>相对路径</summary>
-    String? RelativePath { get; set; }
+    /// <summary>相对于项目存储目录的路径</summary>
+    String RelativePath { get; set; }
 
     /// <summary>存储桶名称</summary>
     String? BucketName { get; set; }

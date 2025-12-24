@@ -23,6 +23,9 @@ public partial interface IFileProject
     /// <summary>项目描述</summary>
     String? Description { get; set; }
 
+    /// <summary>存储根目录（相对或绝对路径）</summary>
+    String? StoragePath { get; set; }
+
     /// <summary>API密钥</summary>
     String? ApiSecret { get; set; }
 

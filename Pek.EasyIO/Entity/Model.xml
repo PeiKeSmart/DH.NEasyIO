@@ -51,8 +51,7 @@
         <Column Name="Size" DataType="Int64" Description="文件大小（字节）" Default="0" />
         <Column Name="Hash" DataType="String" Length="64" Description="文件哈希（MD5/SHA256）" />
         <Column Name="StorageType" DataType="String" Length="20" Description="存储类型（Local/OSS/S3）" Default="Local" />
-        <Column Name="StoragePath" DataType="String" Length="500" Nullable="False" Description="存储路径" />
-        <Column Name="RelativePath" DataType="String" Length="500" Description="相对路径" />
+        <Column Name="RelativePath" DataType="String" Length="500" Nullable="False" Description="相对于项目存储目录的路径" />
         <Column Name="BucketName" DataType="String" Length="100" Description="存储桶名称" />
         <Column Name="AccessLevel" DataType="Int32" Description="访问级别（1=Public,2=Private,3=Internal）" Default="2" />
         <Column Name="IsPublic" DataType="Boolean" Description="是否公开" Default="False" />
@@ -102,6 +101,7 @@
         <Column Name="Code" DataType="String" Nullable="False" Description="项目编码（唯一）" />
         <Column Name="Name" DataType="String" Master="True" Length="100" Nullable="False" Description="项目名称" />
         <Column Name="Description" DataType="String" Length="500" Description="项目描述" />
+        <Column Name="StoragePath" DataType="String" Length="500" Description="存储根目录（相对或绝对路径）" />
         <Column Name="ApiSecret" DataType="String" Length="100" Description="API密钥" />
         <Column Name="MaxStorageSize" DataType="Int64" Description="最大存储空间（字节，0=不限制）" Default="0" />
         <Column Name="UsedStorageSize" DataType="Int64" Description="已用存储空间" Default="0" />

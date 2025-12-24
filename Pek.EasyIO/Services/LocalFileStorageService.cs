@@ -17,9 +17,20 @@ public class LocalFileStorageService : IFileStorageService
         var now = DateTime.Now;
         var relativePath = $"{now:yyyy}/{now:MM}/{now:dd}/{Guid.NewGuid():N}_{fileName}";
         
+        // 获取项目存储根目录
+        var storageRoot = project.StoragePath;
+        if (storageRoot.IsNullOrEmpty())
+            throw new Exception($"项目 [{project.Name}] 未配置存储目录，请在项目设置中指定 StoragePath");
+
+        // 检查根目录是否存在，不存在则创建
+        if (!Directory.Exists(storageRoot))
+        {
+            XTrace.WriteLine($"项目 [{project.Name}] 的存储根目录不存在，正在创建：{storageRoot}");
+            Directory.CreateDirectory(storageRoot);
+        }
+            
         // 完整存储路径
-        var basePath = EasyIOSetting.Current.Path;
-        var fullPath = basePath.CombinePath(relativePath).GetFullPath();
+        var fullPath = Path.Combine(storageRoot, relativePath).GetFullPath();
         
         // 确保目录存在
         fullPath.EnsureDirectory(true);
@@ -50,10 +61,10 @@ public class LocalFileStorageService : IFileStorageService
     /// <summary>获取文件流</summary>
     public Task<Stream> GetFileStreamAsync(FileEntry file)
     {
-        if (!System.IO.File.Exists(file.StoragePath))
-            throw new FileNotFoundException("文件不存在", file.StoragePath);
+        if (!System.IO.File.Exists(file.RelativePath))
+            throw new FileNotFoundException("文件不存在", file.RelativePath);
         
-        Stream stream = System.IO.File.OpenRead(file.StoragePath);
+        Stream stream = System.IO.File.OpenRead(file.RelativePath);
         return Task.FromResult(stream);
     }
 
@@ -62,10 +73,10 @@ public class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            if (System.IO.File.Exists(file.StoragePath))
+            if (System.IO.File.Exists(file.RelativePath))
             {
-                System.IO.File.Delete(file.StoragePath);
-                XTrace.WriteLine($"文件已删除：{file.StoragePath}");
+                System.IO.File.Delete(file.RelativePath);
+                XTrace.WriteLine($"文件已删除：{file.RelativePath}");
                 return Task.FromResult(true);
             }
             return Task.FromResult(false);
