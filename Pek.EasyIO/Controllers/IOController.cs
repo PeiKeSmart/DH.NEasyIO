@@ -9,6 +9,7 @@ using NewLife.Log;
 
 using Pek.EasyIO.Auth;
 using Pek.EasyIO.Services;
+using Pek.Helpers;
 using Pek.Models;
 using Pek.MVC;
 using Pek.Swagger;
@@ -21,9 +22,14 @@ namespace Pek.EasyIO.Controllers;
 public class IOController : ApiControllerBase
 {
     private readonly IFileStorageService _storageService;
+    private readonly IRateLimiter _rateLimiter;
 
     /// <summary>实例化文件控制器</summary>
-    public IOController() => _storageService = new LocalFileStorageService();
+    public IOController(IRateLimiter rateLimiter)
+    {
+        _storageService = new LocalFileStorageService();
+        _rateLimiter = rateLimiter;
+    }
 
     /// <summary>获取项目文件的存储路径</summary>
     /// <param name="project">文件项目</param>
@@ -249,6 +255,20 @@ public class IOController : ApiControllerBase
     {
         if (id <= 0) throw new Exception("无效的文件ID");
 
+        // 0. 限流检查
+        var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
+        if (!_rateLimiter.CheckIpRateLimit(clientIp))
+        {
+            XTrace.WriteLine($"IP限流触发：{clientIp}");
+            return StatusCode(429, new { error = "请求过于频繁，请稍后再试" });
+        }
+
+        if (!_rateLimiter.CheckFileRateLimit(id.ToString()))
+        {
+            XTrace.WriteLine($"文件限流触发：文件ID={id}");
+            return StatusCode(429, new { error = "该文件下载过于频繁，请稍后再试" });
+        }
+
         var startTime = DateTime.Now;
 
         // 1. 查询文件记录
@@ -297,8 +317,6 @@ public class IOController : ApiControllerBase
         // 8. 检查过期时间（DateTime.MinValue 表示永久有效）
         if (entry.ExpiresAt != DateTime.MinValue && entry.ExpiresAt < DateTime.Now)
             throw new Exception("文件已过期");
-
-        var clientIp = GetClientIp();
 
         try
         {
@@ -460,15 +478,10 @@ public class IOController : ApiControllerBase
         };
     }
 
+    /// <summary>获取客户端IP地址（支持代理、负载均衡等场景）</summary>
     private String GetClientIp()
     {
-        var ip = Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        if (ip.IsNullOrEmpty())
-            ip = Request.Headers["X-Real-IP"].FirstOrDefault();
-        if (ip.IsNullOrEmpty())
-            ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-        return ip ?? "unknown";
+        return DHWeb.GetUserHost(HttpContext) ?? "unknown";
     }
 
     #endregion

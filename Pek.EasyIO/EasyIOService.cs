@@ -2,6 +2,8 @@
 
 using NewLife.Log;
 
+using Pek.EasyIO.Services;
+
 namespace Pek.EasyIO;
 
 /// <summary>EasyIO服务</summary>
@@ -16,6 +18,9 @@ public static class EasyIOService
 
         //XTrace.WriteLine("{0} Start 配置EasyIO {0}", new String('=', 32));
         Assembly.GetExecutingAssembly().WriteVersion();
+
+        // 注册限流器
+        services.AddSingleton<IRateLimiter, MemoryRateLimiter>();
 
         //XTrace.WriteLine("{0} End   配置EasyIO {0}", new String('=', 32));
 
