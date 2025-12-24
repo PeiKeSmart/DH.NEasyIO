@@ -87,8 +87,21 @@ public class IOController : ApiControllerBase
         if (!ValidateExtension(ext, project))
             throw new Exception($"不支持的文件类型：{ext}");
 
+        // 生成唯一的存储文件名（时间戳+原文件名+GUID短码+扩展名）避免同名冲突
+        var originalNameWithoutExt = Path.GetFileNameWithoutExtension(id);
+        // 清理文件名中的特殊字符，只保留字母数字中文和常见符号
+        originalNameWithoutExt = System.Text.RegularExpressions.Regex.Replace(originalNameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
+        // 限制原文件名长度，避免路径过长
+        if (originalNameWithoutExt.Length > 50)
+            originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
+        
+        var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var storageName = $"{DateTime.Now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
+        var category_path = category.IsNullOrEmpty() ? "" : category + "/";
+        var relativePath = category_path + storageName;
+        
         // 保存文件到项目存储目录
-        var fileName = GetProjectFilePath(project, id);
+        var fileName = GetProjectFilePath(project, relativePath);
         fileName.EnsureDirectory(true);
 
         String hash;
@@ -147,15 +160,15 @@ public class IOController : ApiControllerBase
             // 创建文件记录
             var entry = new FileEntry
             {
-                Name = Path.GetFileName(id),
-                OriginalName = id,
+                Name = storageName,  // 存储的唯一文件名
+                OriginalName = Path.GetFileName(id),  // 用户上传时的原始文件名
                 Extension = ext,
                 ContentType = GetContentType(ext),
                 Size = fileSize,
                 Hash = hash,
 
                 StorageType = "Local",
-                RelativePath = id,  // 相对于项目存储目录的路径
+                RelativePath = relativePath,  // 实际存储的相对路径
 
                 AccessLevel = isPublic ? 1 : project.DefaultAccessLevel,
                 IsPublic = isPublic,
@@ -287,9 +300,10 @@ public class IOController : ApiControllerBase
             var stream = System.IO.File.OpenRead(filePath);
             var contentType = entry.ContentType ?? "application/octet-stream";
 
-            // 设置 Content-Disposition
+            // 设置 Content-Disposition（使用原始文件名）
             var disposition = inline ? "inline" : "attachment";
-            Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{Uri.EscapeDataString(entry.Name)}\"");
+            var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
+            Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
 
             XTrace.WriteLine($"文件下载：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}");
 
