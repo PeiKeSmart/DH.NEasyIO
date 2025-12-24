@@ -193,7 +193,7 @@ public class IOController : ApiControllerBase
     /// <param name="inline">是否内联显示（预览）。true=预览，false=下载</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
-    [HttpGet]
+    [HttpGet("{id}")]
     public async Task<IActionResult> Get(Int64 id, Boolean inline = false)
     {
         if (id <= 0) throw new Exception("无效的文件ID");
@@ -325,20 +325,6 @@ public class IOController : ApiControllerBase
         }
     }
 
-    /// <summary>获取文件对象的访问Url</summary>
-    /// <param name="id"></param>
-    /// <returns></returns>
-    /// <exception cref="Exception"></exception>
-    /// <exception cref="NotImplementedException"></exception>
-    [HttpGet]
-    public String GetUrl(String id)
-    {
-        if (id.IsNullOrEmpty()) throw new Exception("找不到记录！id=" + id);
-
-        // TODO: 此方法已废弃，应使用基于数据库 ID 的下载方式
-        throw new NotImplementedException("此方法已废弃，请使用 Get(Int64 id) 方法");
-    }
-
     /// <summary>删除文件对象</summary>
     /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
@@ -364,18 +350,6 @@ public class IOController : ApiControllerBase
         entry.Delete();
         
         return 1;
-    }
-
-    /// <summary>搜索文件（已废弃，使用数据库查询代替）</summary>
-    /// <param name="pattern">匹配模式。如/202304/*.jpg</param>
-    /// <param name="start">开始序号。0开始</param>
-    /// <param name="count">最大个数</param>
-    /// <returns></returns>
-    [HttpGet]
-    [Obsolete("已废弃，请使用 FileEntry.Search 方法查询数据库")]
-    public virtual IList<Object> Search(String pattern, Int32 start, Int32 count)
-    {
-        throw new NotSupportedException("此方法已废弃，请通过 FileEntry 实体查询数据库，每个项目必须配置存储目录");
     }
 
     #region 辅助方法
