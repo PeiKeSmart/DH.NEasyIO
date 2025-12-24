@@ -46,14 +46,13 @@ public class IOController : ApiControllerBase
 
     /// <summary>上传文件对象</summary>
     /// <param name="file">上传的文件</param>
-    /// <param name="id">文件名称。可包含路径（可选，不指定则使用上传文件的原始名称）</param>
     /// <param name="category">文件分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
     /// <param name="isPublic">是否公开（可选）</param>
     /// <returns></returns>
     [HttpPut]
-    public async Task<Object> Put(IFormFile file, [FromForm] String id = null, [FromForm] String category = null,
+    public async Task<Object> Put(IFormFile file, [FromForm] String category = null,
         [FromForm] String businessType = null, [FromForm] String businessId = null, [FromForm] Boolean isPublic = false)
     {
         var result = new DGResult();
@@ -66,11 +65,9 @@ public class IOController : ApiControllerBase
             return result;
         }
 
-        // 如果未指定文件名，使用上传文件的原始名称
-        if (id.IsNullOrEmpty())
-            id = file.FileName;
-
-        if (id.IsNullOrEmpty())
+        // 获取原始文件名（只取文件名部分，忽略可能包含的路径）
+        var originalFileName = Path.GetFileName(file.FileName);
+        if (originalFileName.IsNullOrEmpty())
         {
             result.ErrCode = 10000;
             result.Message = GetResource("文件名不能为空");
@@ -83,22 +80,39 @@ public class IOController : ApiControllerBase
             throw new Exception("无法获取项目信息");
 
         // 验证文件扩展名
-        var ext = Path.GetExtension(id);
+        var ext = Path.GetExtension(originalFileName);
         if (!ValidateExtension(ext, project))
             throw new Exception($"不支持的文件类型：{ext}");
 
         // 生成唯一的存储文件名（时间戳+原文件名+GUID短码+扩展名）避免同名冲突
-        var originalNameWithoutExt = Path.GetFileNameWithoutExtension(id);
+        var originalNameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
         // 清理文件名中的特殊字符，只保留字母数字中文和常见符号
         originalNameWithoutExt = System.Text.RegularExpressions.Regex.Replace(originalNameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
         // 限制原文件名长度，避免路径过长
         if (originalNameWithoutExt.Length > 50)
             originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
         
+        var now = DateTime.Now;
         var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
-        var storageName = $"{DateTime.Now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
-        var category_path = category.IsNullOrEmpty() ? "" : category + "/";
-        var relativePath = category_path + storageName;
+        var storageName = $"{now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
+        
+        // 清理 category 参数，防止路径穿越攻击（../、..\等）
+        var safeCategory = category;
+        if (!category.IsNullOrEmpty())
+        {
+            // 移除路径分隔符和特殊字符，只保留字母数字中文横线下划线
+            safeCategory = System.Text.RegularExpressions.Regex.Replace(category, @"[^\w\u4e00-\u9fa5\-]", "_");
+            // 移除连续的下划线
+            safeCategory = System.Text.RegularExpressions.Regex.Replace(safeCategory, @"_{2,}", "_");
+            safeCategory = safeCategory.Trim('_');
+        }
+        
+        // 按日期分片存储，避免单目录文件过多导致性能问题
+        // 路径结构：[category/]YYYY/MM/DD/storageName
+        // 示例：Document/2025/12/24/20251224093045_report_a1b2c3d4.pdf
+        var datePath = $"{now:yyyy}/{now:MM}/{now:dd}";
+        var category_path = safeCategory.IsNullOrEmpty() ? "" : safeCategory + "/";
+        var relativePath = category_path + datePath + "/" + storageName;
         
         // 保存文件到项目存储目录
         var fileName = GetProjectFilePath(project, relativePath);
@@ -147,7 +161,7 @@ public class IOController : ApiControllerBase
                 return new
                 {
                     id = existing.Id,
-                    name = id,
+                    name = existing.Name,
                     originalName = existing.OriginalName,
                     length = existing.Size,
                     hash = existing.Hash,
@@ -161,7 +175,7 @@ public class IOController : ApiControllerBase
             var entry = new FileEntry
             {
                 Name = storageName,  // 存储的唯一文件名
-                OriginalName = Path.GetFileName(id),  // 用户上传时的原始文件名
+                OriginalName = originalFileName,  // 用户上传时的原始文件名
                 Extension = ext,
                 ContentType = GetContentType(ext),
                 Size = fileSize,
@@ -175,7 +189,7 @@ public class IOController : ApiControllerBase
 
                 ProjectId = project.Id,
                 ProjectName = project.Name,
-                Category = category,
+                Category = safeCategory,  // 使用清理后的安全分类名
 
                 BusinessType = businessType,
                 BusinessId = businessId,
@@ -195,7 +209,7 @@ public class IOController : ApiControllerBase
             return new
             {
                 id = entry.Id,
-                name = id,
+                name = entry.Name,
                 originalName = entry.OriginalName,
                 length = entry.Size,
                 hash = entry.Hash,
