@@ -394,6 +394,144 @@ public class IOController : ApiControllerBase
         }
     }
 
+    /// <summary>下载文件（通过 Nginx X-Accel-Redirect 加速）</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <param name="inline">是否内联显示（预览）。true=预览，false=下载</param>
+    /// <returns></returns>
+    /// <exception cref="Exception"></exception>
+    /// <remarks>
+    /// 使用 X-Accel-Redirect 让 Nginx 直接传输文件，应用服务器只负责鉴权和统计。
+    /// 需要 Nginx 配置：
+    /// <code>
+    /// location /protected/ {
+    ///     internal;
+    ///     alias /path/to/storage/;
+    /// }
+    /// </code>
+    /// </remarks>
+    [HttpGet("nginx/{id}")]
+    public async Task<IActionResult> GetWithNginx(Int64 id, Boolean inline = false)
+    {
+        if (id <= 0) throw new Exception("无效的文件ID");
+
+        // 0. 限流检查（早期退出）
+        var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
+        if (!_rateLimiter.CheckIpRateLimit(clientIp))
+            return StatusCode(429, new { error = "请求过于频繁，请稍后再试" });
+        if (!_rateLimiter.CheckFileRateLimit(id.ToString()))
+            return StatusCode(429, new { error = "该文件下载过于频繁，请稍后再试" });
+
+        // 1. 尝试从缓存获取文件元数据（缓存 5 分钟）
+        var cacheKey = $"file_meta_{id}";
+        var cached = _cache.Get<(FileEntry entry, FileProject project, String filePath, DateTime lastModified)>(cacheKey);
+        
+        FileEntry entry;
+        FileProject fileProject;
+        String filePath;
+        DateTime lastModified;
+        
+        if (cached != default)
+        {
+            (entry, fileProject, filePath, lastModified) = cached;
+            // 验证缓存数据仍然有效
+            if (entry.IsDeleted)
+            {
+                _cache.Remove(cacheKey);
+                throw new Exception("文件已被删除");
+            }
+        }
+        else
+        {
+            // 缓存未命中，查询数据库
+            entry = FileEntry.FindById(id);
+            if (entry == null) throw new Exception($"文件不存在：{id}");
+            if (entry.IsDeleted) throw new Exception("文件已被删除");
+
+            fileProject = FileProject.FindById(entry.ProjectId);
+            if (fileProject == null) throw new Exception("文件所属项目不存在");
+
+            filePath = GetProjectFilePath(fileProject, entry.RelativePath);
+            var fileInfo = new FileInfo(filePath);
+            if (!fileInfo.Exists) throw new Exception("物理文件不存在");
+            
+            lastModified = fileInfo.LastWriteTimeUtc;
+
+            // 存入缓存（5分钟过期）
+            _cache.Set(cacheKey, (entry, fileProject, filePath, lastModified), TimeSpan.FromMinutes(5));
+        }
+
+        // 2. 权限验证
+        var project = this.GetCurrentProject();
+        if (project != null && entry.ProjectId != project.Id)
+            throw new Exception("无权访问此文件");
+
+        // 3. 访问级别验证（合并逻辑）
+        var effectiveAccessLevel = Math.Max(fileProject.DefaultAccessLevel, entry.AccessLevel);
+        if (project == null && effectiveAccessLevel >= 2)
+            throw new Exception(effectiveAccessLevel == 2 ? "私有文件需要项目鉴权" : "内部文件仅限同项目访问");
+        if (effectiveAccessLevel == 3 && project?.Id != entry.ProjectId)
+            throw new Exception("内部文件仅限同项目访问");
+
+        // 4. HTTP 缓存验证（优化字符串操作）
+        var etag = $"\"{entry.Hash}-{lastModified.Ticks}\"";
+        var requestETag = Request.Headers["If-None-Match"].ToString();
+        
+        if (requestETag == etag)
+            return StatusCode(304);
+        
+        var requestModifiedSince = Request.Headers["If-Modified-Since"].ToString();
+        if (!requestModifiedSince.IsNullOrEmpty() && 
+            DateTime.TryParse(requestModifiedSince, out var modifiedSince) &&
+            lastModified <= modifiedSince.ToUniversalTime())
+            return StatusCode(304);
+
+        // 5. 异步更新下载计数（每次都计数，SaveAsync 批量写入）
+        entry.DownloadCount++;
+        entry.SaveAsync(3000);
+
+        // 6. 记录日志（采样策略）
+        var shouldLogSample = entry.DownloadCount < 100 || (entry.DownloadCount % 10) == 0;
+        if (shouldLogSample)
+        {
+            var log = new DownloadLog
+            {
+                FileId = entry.Id,
+                FileName = entry.Name,
+                ProjectId = entry.ProjectId,
+                AccessType = "NginxAccel",  // 标记为 Nginx 加速方式
+                ClientIp = clientIp,
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                Referer = Request.Headers["Referer"].FirstOrDefault(),
+                Success = true,
+                ResponseCode = 200,
+                BytesTransferred = entry.Size,
+                CreateTime = DateTime.Now
+            };
+            log.SaveAsync(3000);
+        }
+
+        XTrace.WriteLine($"文件下载(Nginx)：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}");
+
+        // 7. 构造 X-Accel-Redirect 路径（需根据 Nginx 配置调整）
+        // 假设 Nginx 配置：location /protected/ { internal; alias /storage/root/; }
+        // 则需要将物理路径转换为 /protected/ 开头的虚拟路径
+        var nginxInternalPath = $"/protected/{entry.ProjectId}/{entry.RelativePath}";
+        
+        // 8. 设置响应头，让 Nginx 接管文件传输
+        var contentType = entry.ContentType ?? "application/octet-stream";
+        var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
+        
+        Response.Headers.Append("X-Accel-Redirect", nginxInternalPath);
+        Response.Headers.Append("Content-Type", contentType);
+        Response.Headers.Append("Content-Disposition", $"{(inline ? "inline" : "attachment")}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
+        Response.Headers.Append("ETag", etag);
+        Response.Headers.Append("Last-Modified", lastModified.ToString("R"));
+        Response.Headers.Append("Cache-Control", effectiveAccessLevel == 1 ? "public, max-age=3600" : "private, no-cache");
+        
+        // 返回空响应体，实际文件由 Nginx 传输
+        return new EmptyResult();
+    }
+
     /// <summary>删除文件对象</summary>
     /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
