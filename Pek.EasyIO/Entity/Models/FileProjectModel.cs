@@ -47,12 +47,6 @@ public partial class FileProjectModel
     /// <summary>默认访问级别。1公开 2私有 3内部</summary>
     public Int32 DefaultAccessLevel { get; set; }
 
-    /// <summary>每IP每分钟限制次数</summary>
-    public Int32 RateLimitPerIp { get; set; }
-
-    /// <summary>每文件每分钟限制次数</summary>
-    public Int32 RateLimitPerFile { get; set; }
-
     /// <summary>是否启用</summary>
     public Boolean Enable { get; set; }
 
@@ -83,8 +77,6 @@ public partial class FileProjectModel
         AllowedExtensions = model.AllowedExtensions;
         ForbiddenExtensions = model.ForbiddenExtensions;
         DefaultAccessLevel = model.DefaultAccessLevel;
-        RateLimitPerIp = model.RateLimitPerIp;
-        RateLimitPerFile = model.RateLimitPerFile;
         Enable = model.Enable;
         CreateTime = model.CreateTime;
         UpdateTime = model.UpdateTime;

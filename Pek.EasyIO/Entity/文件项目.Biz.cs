@@ -90,8 +90,6 @@ public partial class FileProject : DHEntityBase<FileProject>
             AllowedExtensions = null,  // 不限制扩展名
             ForbiddenExtensions = null,  // 不禁止任何扩展名（根据实际需求配置）
             DefaultAccessLevel = 1,  // 1=公开访问
-            RateLimitPerIp = 100,  // 每IP每分钟100次
-            RateLimitPerFile = 10,  // 每文件每分钟10次
             Enable = true
         };
         entity.Insert();

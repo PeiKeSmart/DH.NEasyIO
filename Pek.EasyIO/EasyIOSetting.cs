@@ -15,8 +15,4 @@ public class EasyIOSetting : Config<EasyIOSetting>
     /// <summary>每IP每分钟最大请求数</summary>
     [Description("每IP每分钟最大请求数")]
     public Int32 RateLimitPerIp { get; set; } = 10;
-
-    /// <summary>每文件每分钟最大下载次数</summary>
-    [Description("每文件每分钟最大下载次数")]
-    public Int32 RateLimitPerFile { get; set; } = 20;
 }

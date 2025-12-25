@@ -262,8 +262,6 @@ public class IOController : ApiControllerBase
         var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
         if (!_rateLimiter.CheckIpRateLimit(clientIp))
             return StatusCode(429, new { error = "请求过于频繁，请稍后再试" });
-        if (!_rateLimiter.CheckFileRateLimit(id.ToString()))
-            return StatusCode(429, new { error = "该文件下载过于频繁，请稍后再试" });
 
         // 1. 尝试从缓存获取文件元数据（缓存 5 分钟）
         var cacheKey = $"file_meta_{id}";

@@ -119,22 +119,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
     [BindColumn("DefaultAccessLevel", "默认访问级别。1公开 2私有 3内部", "")]
     public Int32 DefaultAccessLevel { get => _DefaultAccessLevel; set { if (OnPropertyChanging("DefaultAccessLevel", value)) { _DefaultAccessLevel = value; OnPropertyChanged("DefaultAccessLevel"); } } }
 
-    private Int32 _RateLimitPerIp;
-    /// <summary>每IP每分钟限制次数</summary>
-    [DisplayName("每IP每分钟限制次数")]
-    [Description("每IP每分钟限制次数")]
-    [DataObjectField(false, false, false, 0)]
-    [BindColumn("RateLimitPerIp", "每IP每分钟限制次数", "")]
-    public Int32 RateLimitPerIp { get => _RateLimitPerIp; set { if (OnPropertyChanging("RateLimitPerIp", value)) { _RateLimitPerIp = value; OnPropertyChanged("RateLimitPerIp"); } } }
-
-    private Int32 _RateLimitPerFile;
-    /// <summary>每文件每分钟限制次数</summary>
-    [DisplayName("每文件每分钟限制次数")]
-    [Description("每文件每分钟限制次数")]
-    [DataObjectField(false, false, false, 0)]
-    [BindColumn("RateLimitPerFile", "每文件每分钟限制次数", "")]
-    public Int32 RateLimitPerFile { get => _RateLimitPerFile; set { if (OnPropertyChanging("RateLimitPerFile", value)) { _RateLimitPerFile = value; OnPropertyChanged("RateLimitPerFile"); } } }
-
     private Boolean _Enable;
     /// <summary>是否启用</summary>
     [DisplayName("是否启用")]
@@ -185,8 +169,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         AllowedExtensions = model.AllowedExtensions;
         ForbiddenExtensions = model.ForbiddenExtensions;
         DefaultAccessLevel = model.DefaultAccessLevel;
-        RateLimitPerIp = model.RateLimitPerIp;
-        RateLimitPerFile = model.RateLimitPerFile;
         Enable = model.Enable;
         CreateTime = model.CreateTime;
         UpdateTime = model.UpdateTime;
@@ -214,8 +196,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
             "AllowedExtensions" => _AllowedExtensions,
             "ForbiddenExtensions" => _ForbiddenExtensions,
             "DefaultAccessLevel" => _DefaultAccessLevel,
-            "RateLimitPerIp" => _RateLimitPerIp,
-            "RateLimitPerFile" => _RateLimitPerFile,
             "Enable" => _Enable,
             "CreateTime" => _CreateTime,
             "UpdateTime" => _UpdateTime,
@@ -238,8 +218,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
                 case "AllowedExtensions": _AllowedExtensions = Convert.ToString(value); break;
                 case "ForbiddenExtensions": _ForbiddenExtensions = Convert.ToString(value); break;
                 case "DefaultAccessLevel": _DefaultAccessLevel = value.ToInt(); break;
-                case "RateLimitPerIp": _RateLimitPerIp = value.ToInt(); break;
-                case "RateLimitPerFile": _RateLimitPerFile = value.ToInt(); break;
                 case "Enable": _Enable = value.ToBoolean(); break;
                 case "CreateTime": _CreateTime = value.ToDateTime(); break;
                 case "UpdateTime": _UpdateTime = value.ToDateTime(); break;
@@ -346,12 +324,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
         /// <summary>默认访问级别。1公开 2私有 3内部</summary>
         public static readonly Field DefaultAccessLevel = FindByName("DefaultAccessLevel");
 
-        /// <summary>每IP每分钟限制次数</summary>
-        public static readonly Field RateLimitPerIp = FindByName("RateLimitPerIp");
-
-        /// <summary>每文件每分钟限制次数</summary>
-        public static readonly Field RateLimitPerFile = FindByName("RateLimitPerFile");
-
         /// <summary>是否启用</summary>
         public static readonly Field Enable = FindByName("Enable");
 
@@ -405,12 +377,6 @@ public partial class FileProject : IFileProject, IEntity<IFileProject>
 
         /// <summary>默认访问级别。1公开 2私有 3内部</summary>
         public const String DefaultAccessLevel = "DefaultAccessLevel";
-
-        /// <summary>每IP每分钟限制次数</summary>
-        public const String RateLimitPerIp = "RateLimitPerIp";
-
-        /// <summary>每文件每分钟限制次数</summary>
-        public const String RateLimitPerFile = "RateLimitPerFile";
 
         /// <summary>是否启用</summary>
         public const String Enable = "Enable";

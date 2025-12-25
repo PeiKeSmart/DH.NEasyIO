@@ -107,8 +107,6 @@
         <Column Name="AllowedExtensions" DataType="String" Length="500" Description="允许的扩展名（.jpg,.png）" />
         <Column Name="ForbiddenExtensions" DataType="String" Length="500" Description="禁止的扩展名" />
         <Column Name="DefaultAccessLevel" DataType="Int32" Description="默认访问级别。1公开 2私有 3内部" Default="2" />
-        <Column Name="RateLimitPerIp" DataType="Int32" Description="每IP每分钟限制次数" Default="10" />
-        <Column Name="RateLimitPerFile" DataType="Int32" Description="每文件每分钟限制次数" Default="20" />
         <Column Name="Enable" DataType="Boolean" Description="是否启用" Default="True" />
         <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="创建时间" />
         <Column Name="UpdateTime" DataType="DateTime" Description="更新时间" />
