@@ -58,13 +58,15 @@ public class IOController : ApiControllerBase
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
     /// <param name="isPublic">是否公开（可选）</param>
+    /// <param name="directory">指定存储目录（可选）。指定后文件存储在该目录下，为空则按年月日结构存储</param>
     /// <param name="remark">备注说明（必填）</param>
     /// <returns></returns>
     [ApiAuth]  // 上传需要API鉴权
     [HttpPut]
     public async Task<Object> Put(IFormFile file, [FromForm] String remark,
         [FromForm] String category = null, [FromForm] String businessType = null, 
-        [FromForm] String businessId = null, [FromForm] Boolean isPublic = false)
+        [FromForm] String businessId = null, [FromForm] Boolean isPublic = false,
+        [FromForm] String directory = null)
     {
         var result = new DGResult();
 
@@ -126,12 +128,36 @@ public class IOController : ApiControllerBase
             safeCategory = safeCategory.Trim('_');
         }
         
-        // 按日期分片存储，避免单目录文件过多导致性能问题
-        // 路径结构：[category/]YYYY/MM/DD/storageName
-        // 示例：Document/2025/12/24/20251224093045_report_a1b2c3d4.pdf
-        var datePath = $"{now:yyyy}/{now:MM}/{now:dd}";
-        var category_path = safeCategory.IsNullOrEmpty() ? "" : safeCategory + "/";
-        var relativePath = category_path + datePath + "/" + storageName;
+        // 清理 directory 参数，防止路径穿越攻击
+        var safeDirectory = directory;
+        if (!directory.IsNullOrEmpty())
+        {
+            // 移除路径分隔符和特殊字符，只保留字母数字中文横线下划线和斜杠
+            safeDirectory = System.Text.RegularExpressions.Regex.Replace(directory, @"[^\w\u4e00-\u9fa5\-/]", "_");
+            // 移除连续的下划线和斜杠
+            safeDirectory = System.Text.RegularExpressions.Regex.Replace(safeDirectory, @"_{2,}", "_");
+            safeDirectory = System.Text.RegularExpressions.Regex.Replace(safeDirectory, @"/{2,}", "/");
+            safeDirectory = safeDirectory.Trim('_').Trim('/');
+        }
+        
+        // 根据是否指定 directory 决定存储路径结构
+        String relativePath;
+        if (!safeDirectory.IsNullOrEmpty())
+        {
+            // 指定了目录，直接使用该目录存储
+            // 路径结构：directory/storageName
+            // 示例：Project_A/20251224093045_report_a1b2c3d4.pdf
+            relativePath = safeDirectory + "/" + storageName;
+        }
+        else
+        {
+            // 未指定目录，按日期分片存储，避免单目录文件过多导致性能问题
+            // 路径结构：[category/]YYYY/MM/DD/storageName
+            // 示例：Document/2025/12/24/20251224093045_report_a1b2c3d4.pdf
+            var datePath = $"{now:yyyy}/{now:MM}/{now:dd}";
+            var category_path = safeCategory.IsNullOrEmpty() ? "" : safeCategory + "/";
+            relativePath = category_path + datePath + "/" + storageName;
+        }
         
         // 保存文件到项目存储目录
         var fileName = GetProjectFilePath(project, relativePath);
