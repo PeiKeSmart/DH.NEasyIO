@@ -418,6 +418,141 @@ public class IOController : ApiControllerBase
         }
     }
 
+    /// <summary>替换文件内容（保留ID和元数据）</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <param name="file">新上传的文件</param>
+    /// <param name="remark">备注说明（可选，不填则保留原备注）</param>
+    /// <returns></returns>
+    /// <exception cref="Exception"></exception>
+    [ApiAuth]  // 替换需要API鉴权
+    [HttpPost("{id}/replace")]
+    public async Task<Object> Replace(Int64 id, IFormFile file, [FromForm] String remark = null)
+    {
+        if (id <= 0) throw new Exception("无效的文件ID");
+        if (file == null || file.Length == 0) throw new Exception("未上传文件或文件为空");
+
+        // 查询原有文件记录
+        var entry = FileEntry.FindById(id);
+        if (entry == null) throw new Exception("文件记录不存在");
+        if (entry.IsDeleted) throw new Exception("文件已被删除");
+
+        var project = FileProject.FindById(entry.ProjectId);
+        if (project == null) throw new Exception("文件所属项目不存在");
+
+        // 权限验证：只能替换本项目文件
+        var currentProject = this.GetCurrentProject();
+        if (currentProject?.Id != entry.ProjectId)
+            throw new Exception("无权替换其他项目的文件");
+
+        // 获取新文件信息
+        var originalFileName = Path.GetFileName(file.FileName);
+        if (originalFileName.IsNullOrEmpty())
+            throw new Exception("文件名不能为空");
+
+        var ext = Path.GetExtension(originalFileName);
+        if (!ValidateExtension(ext, project))
+            throw new Exception($"不支持的文件类型：{ext}");
+
+        // 生成新的存储文件名（保持与原文件相同的目录结构）
+        var originalNameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
+        originalNameWithoutExt = System.Text.RegularExpressions.Regex.Replace(originalNameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
+        if (originalNameWithoutExt.Length > 50)
+            originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
+
+        var now = DateTime.Now;
+        var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var storageName = $"{now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
+
+        // 保持原目录结构，只替换文件名
+        var oldRelativePath = entry.RelativePath;
+        var directory = Path.GetDirectoryName(oldRelativePath)?.Replace("\\", "/");
+        var relativePath = directory.IsNullOrEmpty() ? storageName : directory + "/" + storageName;
+
+        // 保存新文件
+        var newFilePath = GetProjectFilePath(project, relativePath);
+        newFilePath.EnsureDirectory(true);
+
+        String hash;
+        Int64 fileSize;
+
+        using (var uploadStream = file.OpenReadStream())
+        using (var fs = new FileStream(newFilePath, FileMode.Create))
+        {
+            using var md5 = MD5.Create();
+            var buffer = new Byte[8192];
+            Int32 bytesRead;
+            fileSize = 0;
+
+            while ((bytesRead = await uploadStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                await fs.WriteAsync(buffer, 0, bytesRead);
+                md5.TransformBlock(buffer, 0, bytesRead, buffer, 0);
+                fileSize += bytesRead;
+            }
+
+            md5.TransformFinalBlock(buffer, 0, 0);
+            hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
+        }
+
+        // 验证文件大小
+        if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
+        {
+            System.IO.File.Delete(newFilePath);
+            throw new Exception($"文件大小超过限制（{project.MaxFileSize.ToGMK()}）");
+        }
+
+        // 删除旧物理文件
+        var oldFilePath = GetProjectFilePath(project, oldRelativePath);
+        if (System.IO.File.Exists(oldFilePath))
+        {
+            try
+            {
+                System.IO.File.Delete(oldFilePath);
+            }
+            catch (Exception ex)
+            {
+                XTrace.WriteLine($"删除旧文件失败（继续执行）：{oldFilePath} - {ex.Message}");
+            }
+        }
+
+        // 更新项目存储统计
+        var sizeDiff = fileSize - entry.Size;
+        project.UsedStorageSize += sizeDiff;
+        project.Update();
+
+        // 更新文件记录（保留ID、创建时间、下载次数等元数据）
+        entry.Name = storageName;
+        entry.OriginalName = originalFileName;
+        entry.Extension = ext;
+        entry.ContentType = GetContentType(ext);
+        entry.Size = fileSize;
+        entry.Hash = hash;
+        entry.RelativePath = relativePath;
+        entry.UpdateTime = now;
+        entry.UpdateIP = GetClientIp();
+        if (!remark.IsNullOrEmpty())
+            entry.Remark = remark;
+
+        entry.Update();
+
+        // 清除缓存
+        _cache.Remove($"file_meta_{id}");
+
+        XTrace.WriteLine($"文件替换成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})，原大小：{entry.Size - sizeDiff}");
+
+        return new
+        {
+            id = entry.Id,
+            name = entry.Name,
+            originalName = entry.OriginalName,
+            length = entry.Size,
+            hash = entry.Hash,
+            time = entry.UpdateTime,
+            downloadCount = entry.DownloadCount,
+            replaced = true
+        };
+    }
+
     /// <summary>删除文件对象</summary>
     /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
