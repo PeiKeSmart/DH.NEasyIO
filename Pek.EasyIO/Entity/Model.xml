@@ -81,6 +81,7 @@
         <Column Name="UpdateTime" DataType="DateTime" Description="更新时间" />
         <Column Name="UpdateIP" DataType="String" Description="更新IP" />
         <Column Name="Remark" DataType="String" Length="500" Description="备注说明" />
+        <Column Name="IpRateLimitPerMinute" DataType="Int32" Description="IP限流-每分钟最大请求次数(0=不限制)" Default="0" />
       </Columns>
       <Indexes>
         <Index Columns="Hash" />

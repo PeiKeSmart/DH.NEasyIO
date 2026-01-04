@@ -124,6 +124,9 @@ public partial class FileEntryModel
 
     /// <summary>备注说明</summary>
     public String? Remark { get; set; }
+
+    /// <summary>IP限流-每分钟最大请求次数(0=不限制)</summary>
+    public Int32 IpRateLimitPerMinute { get; set; }
     #endregion
 
     #region 拷贝
@@ -169,6 +172,7 @@ public partial class FileEntryModel
         UpdateTime = model.UpdateTime;
         UpdateIP = model.UpdateIP;
         Remark = model.Remark;
+        IpRateLimitPerMinute = model.IpRateLimitPerMinute;
     }
     #endregion
 }

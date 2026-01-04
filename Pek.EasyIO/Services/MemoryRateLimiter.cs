@@ -25,6 +25,16 @@ public class MemoryRateLimiter : IRateLimiter
         return CheckLimit(key, _ipLimitPerMinute);
     }
 
+    /// <summary>检查文件级别IP限流</summary>
+    public Boolean CheckFileIpRateLimit(String ip, Int64 fileId, Int32 limitPerMinute)
+    {
+        // 未设置限制或限制为0，不限流
+        if (limitPerMinute <= 0) return true;
+        
+        var key = $"file:{fileId}:ip:{ip}";
+        return CheckLimit(key, limitPerMinute);
+    }
+
     private Boolean CheckLimit(String key, Int32 limit)
     {
         var now = DateTime.Now;

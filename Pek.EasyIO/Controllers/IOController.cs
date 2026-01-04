@@ -283,10 +283,7 @@ public class IOController : ApiControllerBase
     {
         if (id <= 0) throw new Exception("无效的文件ID");
 
-        // 0. 限流检查（早期退出）
         var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
-        if (!_rateLimiter.CheckIpRateLimit(clientIp))
-            return StatusCode(429, new { error = "请求过于频繁，请稍后再试" });
 
         // 1. 尝试从缓存获取文件元数据（缓存 5 分钟）
         var cacheKey = $"file_meta_{id}";
@@ -325,6 +322,20 @@ public class IOController : ApiControllerBase
 
             // 存入缓存（5分钟过期）
             _cache.Set(cacheKey, (entry, fileProject, filePath, lastModified), TimeSpan.FromMinutes(5));
+        }
+
+        // 1.5. IP限流检查（文件级别优先，否则使用全局配置）
+        if (entry.IpRateLimitPerMinute > 0)
+        {
+            // 文件级别限流
+            if (!_rateLimiter.CheckFileIpRateLimit(clientIp, entry.Id, entry.IpRateLimitPerMinute))
+                return StatusCode(429, new { error = "该文件访问过于频繁，请稍后再试" });
+        }
+        else
+        {
+            // 全局限流
+            if (!_rateLimiter.CheckIpRateLimit(clientIp))
+                return StatusCode(429, new { error = "请求过于频繁，请稍后再试" });
         }
 
         // 2. 权限验证

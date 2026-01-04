@@ -124,5 +124,8 @@ public partial interface IFileEntry
 
     /// <summary>备注说明</summary>
     String? Remark { get; set; }
+
+    /// <summary>IP限流-每分钟最大请求次数(0=不限制)</summary>
+    Int32 IpRateLimitPerMinute { get; set; }
     #endregion
 }

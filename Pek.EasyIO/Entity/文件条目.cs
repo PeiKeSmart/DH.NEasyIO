@@ -331,6 +331,14 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     [DataObjectField(false, false, true, 500)]
     [BindColumn("Remark", "备注说明", "")]
     public String? Remark { get => _Remark; set { if (OnPropertyChanging("Remark", value)) { _Remark = value; OnPropertyChanged("Remark"); } } }
+
+    private Int32 _IpRateLimitPerMinute;
+    /// <summary>IP限流-每分钟最大请求次数(0=不限制)</summary>
+    [DisplayName("IP限流-每分钟最大请求次数(0=不限制)")]
+    [Description("IP限流-每分钟最大请求次数(0=不限制)")]
+    [DataObjectField(false, false, false, 0)]
+    [BindColumn("IpRateLimitPerMinute", "IP限流-每分钟最大请求次数(0=不限制)", "")]
+    public Int32 IpRateLimitPerMinute { get => _IpRateLimitPerMinute; set { if (OnPropertyChanging("IpRateLimitPerMinute", value)) { _IpRateLimitPerMinute = value; OnPropertyChanged("IpRateLimitPerMinute"); } } }
     #endregion
 
     #region 拷贝
@@ -376,6 +384,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         UpdateTime = model.UpdateTime;
         UpdateIP = model.UpdateIP;
         Remark = model.Remark;
+        IpRateLimitPerMinute = model.IpRateLimitPerMinute;
     }
     #endregion
 
@@ -425,6 +434,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
             "UpdateTime" => _UpdateTime,
             "UpdateIP" => _UpdateIP,
             "Remark" => _Remark,
+            "IpRateLimitPerMinute" => _IpRateLimitPerMinute,
             _ => base[name]
         };
         set
@@ -469,6 +479,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
                 case "UpdateTime": _UpdateTime = value.ToDateTime(); break;
                 case "UpdateIP": _UpdateIP = Convert.ToString(value); break;
                 case "Remark": _Remark = Convert.ToString(value); break;
+                case "IpRateLimitPerMinute": _IpRateLimitPerMinute = value.ToInt(); break;
                 default: base[name] = value; break;
             }
         }
@@ -663,6 +674,9 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         /// <summary>备注说明</summary>
         public static readonly Field Remark = FindByName("Remark");
 
+        /// <summary>IP限流-每分钟最大请求次数(0=不限制)</summary>
+        public static readonly Field IpRateLimitPerMinute = FindByName("IpRateLimitPerMinute");
+
         static Field FindByName(String name) => Meta.Table.FindByName(name);
     }
 
@@ -782,6 +796,9 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>备注说明</summary>
         public const String Remark = "Remark";
+
+        /// <summary>IP限流-每分钟最大请求次数(0=不限制)</summary>
+        public const String IpRateLimitPerMinute = "IpRateLimitPerMinute";
     }
     #endregion
 }
