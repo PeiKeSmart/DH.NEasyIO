@@ -116,14 +116,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     [BindColumn("AccessLevel", "访问级别（1=Public,2=Private,3=Internal）", "")]
     public Int32 AccessLevel { get => _AccessLevel; set { if (OnPropertyChanging("AccessLevel", value)) { _AccessLevel = value; OnPropertyChanged("AccessLevel"); } } }
 
-    private Boolean _IsPublic;
-    /// <summary>是否公开</summary>
-    [DisplayName("是否公开")]
-    [Description("是否公开")]
-    [DataObjectField(false, false, false, 0)]
-    [BindColumn("IsPublic", "是否公开", "")]
-    public Boolean IsPublic { get => _IsPublic; set { if (OnPropertyChanging("IsPublic", value)) { _IsPublic = value; OnPropertyChanged("IsPublic"); } } }
-
     private Int32 _DownloadCount;
     /// <summary>已下载次数</summary>
     [DisplayName("已下载次数")]
@@ -357,7 +349,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         RelativePath = model.RelativePath;
         BucketName = model.BucketName;
         AccessLevel = model.AccessLevel;
-        IsPublic = model.IsPublic;
         DownloadCount = model.DownloadCount;
         ProjectId = model.ProjectId;
         ProjectName = model.ProjectName;
@@ -407,7 +398,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
             "RelativePath" => _RelativePath,
             "BucketName" => _BucketName,
             "AccessLevel" => _AccessLevel,
-            "IsPublic" => _IsPublic,
             "DownloadCount" => _DownloadCount,
             "ProjectId" => _ProjectId,
             "ProjectName" => _ProjectName,
@@ -452,7 +442,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
                 case "RelativePath": _RelativePath = Convert.ToString(value); break;
                 case "BucketName": _BucketName = Convert.ToString(value); break;
                 case "AccessLevel": _AccessLevel = value.ToInt(); break;
-                case "IsPublic": _IsPublic = value.ToBoolean(); break;
                 case "DownloadCount": _DownloadCount = value.ToInt(); break;
                 case "ProjectId": _ProjectId = value.ToLong(); break;
                 case "ProjectName": _ProjectName = Convert.ToString(value); break;
@@ -529,7 +518,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     /// <param name="businessId">业务ID</param>
     /// <param name="ownerId">所有者用户ID</param>
     /// <param name="isDeleted">是否已删除</param>
-    /// <param name="isPublic">是否公开</param>
     /// <param name="isScanned">是否已病毒扫描</param>
     /// <param name="isEncrypted">是否加密存储</param>
     /// <param name="start">创建时间开始</param>
@@ -537,7 +525,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     /// <param name="key">关键字</param>
     /// <param name="page">分页参数信息。可携带统计和数据权限扩展查询等信息</param>
     /// <returns>实体列表</returns>
-    public static IList<FileEntry> Search(String? hash, Int32 accessLevel, Int64 projectId, String? businessType, String? businessId, Int64 ownerId, Boolean? isDeleted, Boolean? isPublic, Boolean? isScanned, Boolean? isEncrypted, DateTime start, DateTime end, String key, PageParameter page)
+    public static IList<FileEntry> Search(String? hash, Int32 accessLevel, Int64 projectId, String? businessType, String? businessId, Int64 ownerId, Boolean? isDeleted, Boolean? isScanned, Boolean? isEncrypted, DateTime start, DateTime end, String key, PageParameter page)
     {
         var exp = new WhereExpression();
 
@@ -548,7 +536,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         if (!businessId.IsNullOrEmpty()) exp &= _.BusinessId == businessId;
         if (ownerId >= 0) exp &= _.OwnerId == ownerId;
         if (isDeleted != null) exp &= _.IsDeleted == isDeleted;
-        if (isPublic != null) exp &= _.IsPublic == isPublic;
         if (isScanned != null) exp &= _.IsScanned == isScanned;
         if (isEncrypted != null) exp &= _.IsEncrypted == isEncrypted;
         exp &= _.CreateTime.Between(start, end);
@@ -594,9 +581,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>访问级别（1=Public,2=Private,3=Internal）</summary>
         public static readonly Field AccessLevel = FindByName("AccessLevel");
-
-        /// <summary>是否公开</summary>
-        public static readonly Field IsPublic = FindByName("IsPublic");
 
         /// <summary>已下载次数</summary>
         public static readonly Field DownloadCount = FindByName("DownloadCount");
@@ -717,9 +701,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>访问级别（1=Public,2=Private,3=Internal）</summary>
         public const String AccessLevel = "AccessLevel";
-
-        /// <summary>是否公开</summary>
-        public const String IsPublic = "IsPublic";
 
         /// <summary>已下载次数</summary>
         public const String DownloadCount = "DownloadCount";

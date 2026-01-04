@@ -56,7 +56,7 @@ class Program
                 category: "测试",
                 businessType: "Demo",
                 businessId: "123",
-                isPublic: false
+                accessLevel: 2  // 2=Private
             );
 
             Console.WriteLine($"\n上传成功！");
@@ -92,7 +92,7 @@ class Program
                 localFilePath: testFilePath,
                 remark: "测试文件 - 重复上传",
                 category: "测试",
-                isPublic: false
+                accessLevel: 2  // 2=Private
             );
 
             Console.WriteLine($"  重复标记: {uploadResult2.Duplicate}");

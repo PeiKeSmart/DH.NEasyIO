@@ -34,10 +34,10 @@ public class EasyIOClient
     /// <param name="category">分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
-    /// <param name="isPublic">是否公开</param>
+    /// <param name="accessLevel">访问级别（0=使用项目默认值,1=Public,2=Private,3=Internal）</param>
     /// <returns></returns>
     public async Task<UploadResult> UploadFileAsync(String localFilePath, String remark,
-        String category = null, String businessType = null, String businessId = null, bool isPublic = false)
+        String category = null, String businessType = null, String businessId = null, Int32 accessLevel = 0)
     {
         Console.WriteLine($"开始上传文件：{localFilePath}");
 
@@ -228,7 +228,7 @@ public class UploadResult
     public Boolean IsDirectory { get; set; }
     public Int64 ProjectId { get; set; }
     public String Category { get; set; }
-    public Boolean IsPublic { get; set; }
+    public Int32 AccessLevel { get; set; }
     public String Remark { get; set; }
     public Boolean Duplicate { get; set; }
 }

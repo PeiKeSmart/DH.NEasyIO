@@ -90,7 +90,6 @@ public partial class FileEntry : DHEntityBase<FileEntry>
     //    entity.RelativePath = "abc";
     //    entity.BucketName = "abc";
     //    entity.AccessLevel = 0;
-    //    entity.IsPublic = true;
     //    entity.MaxDownloads = 0;
     //    entity.DownloadCount = 0;
     //    entity.ExpiresAt = DateTime.Now;

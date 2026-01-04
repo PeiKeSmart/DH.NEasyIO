@@ -54,7 +54,6 @@
         <Column Name="RelativePath" DataType="String" Length="500" Nullable="False" Description="相对于项目存储目录的路径" />
         <Column Name="BucketName" DataType="String" Length="100" Description="存储桶名称" />
         <Column Name="AccessLevel" DataType="Int32" Description="访问级别（1=Public,2=Private,3=Internal）" Default="2" />
-        <Column Name="IsPublic" DataType="Boolean" Description="是否公开" Default="False" />
         <Column Name="DownloadCount" DataType="Int32" Description="已下载次数" Default="0" />
         <Column Name="ProjectId" DataType="Int64" Description="所属项目ID" Default="0" />
         <Column Name="ProjectName" DataType="String" Length="100" Description="项目名称（冗余）" />

@@ -44,9 +44,6 @@ public partial interface IFileEntry
     /// <summary>访问级别（1=Public,2=Private,3=Internal）</summary>
     Int32 AccessLevel { get; set; }
 
-    /// <summary>是否公开</summary>
-    Boolean IsPublic { get; set; }
-
     /// <summary>已下载次数</summary>
     Int32 DownloadCount { get; set; }
 

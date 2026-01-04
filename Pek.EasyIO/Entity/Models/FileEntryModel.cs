@@ -44,9 +44,6 @@ public partial class FileEntryModel
     /// <summary>访问级别（1=Public,2=Private,3=Internal）</summary>
     public Int32 AccessLevel { get; set; }
 
-    /// <summary>是否公开</summary>
-    public Boolean IsPublic { get; set; }
-
     /// <summary>已下载次数</summary>
     public Int32 DownloadCount { get; set; }
 
@@ -145,7 +142,6 @@ public partial class FileEntryModel
         RelativePath = model.RelativePath;
         BucketName = model.BucketName;
         AccessLevel = model.AccessLevel;
-        IsPublic = model.IsPublic;
         DownloadCount = model.DownloadCount;
         ProjectId = model.ProjectId;
         ProjectName = model.ProjectName;

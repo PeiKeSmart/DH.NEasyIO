@@ -57,7 +57,7 @@ public class IOController : ApiControllerBase
     /// <param name="category">文件分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
-    /// <param name="isPublic">是否公开（可选）</param>
+    /// <param name="accessLevel">访问级别（可选，0=使用项目默认值,1=Public,2=Private,3=Internal）</param>
     /// <param name="directory">指定存储目录（可选）。指定后文件存储在该目录下，为空则按年月日结构存储</param>
     /// <param name="remark">备注说明（必填）</param>
     /// <returns></returns>
@@ -65,7 +65,7 @@ public class IOController : ApiControllerBase
     [HttpPut]
     public async Task<Object> Put(IFormFile file, [FromForm] String remark,
         [FromForm] String category = null, [FromForm] String businessType = null, 
-        [FromForm] String businessId = null, [FromForm] Boolean isPublic = false,
+        [FromForm] String businessId = null, [FromForm] Int32 accessLevel = 0,
         [FromForm] String directory = null)
     {
         var result = new DGResult();
@@ -229,8 +229,7 @@ public class IOController : ApiControllerBase
                 StorageType = "Local",
                 RelativePath = relativePath,  // 实际存储的相对路径
 
-                AccessLevel = isPublic ? 1 : project.DefaultAccessLevel,
-                IsPublic = isPublic,
+                AccessLevel = accessLevel > 0 ? accessLevel : project.DefaultAccessLevel,
 
                 ProjectId = project.Id,
                 ProjectName = project.Name,
@@ -263,7 +262,7 @@ public class IOController : ApiControllerBase
                 isDirectory = false,
                 projectId = entry.ProjectId,
                 category = entry.Category,
-                isPublic = entry.IsPublic,
+                accessLevel = entry.AccessLevel,
                 remark = entry.Remark
             };
         }
