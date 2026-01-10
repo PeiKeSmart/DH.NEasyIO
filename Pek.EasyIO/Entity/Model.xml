@@ -197,6 +197,7 @@
         <Column Name="FileHash" DataType="String" Length="64" Description="文件哈希" />
         <Column Name="UserId" DataType="Int64" Description="操作用户ID" Default="0" />
         <Column Name="UserName" DataType="String" Length="100" Description="操作用户名" />
+        <Column Name="ExternalUserId" DataType="String" Length="100" Description="外部用户关联ID（由请求方传递）" />
         <Column Name="ClientIp" DataType="String" Description="客户端IP" />
         <Column Name="UserAgent" DataType="String" Length="500" Description="用户代理" />
         <Column Name="Success" DataType="Boolean" Description="是否成功" Default="True" />

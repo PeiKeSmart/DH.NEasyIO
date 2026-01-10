@@ -47,6 +47,9 @@ public partial class FileOperationLogModel
     /// <summary>操作用户名</summary>
     public String? UserName { get; set; }
 
+    /// <summary>外部用户关联ID（由请求方传递）</summary>
+    public String? ExternalUserId { get; set; }
+
     /// <summary>客户端IP</summary>
     public String? ClientIp { get; set; }
 
@@ -89,6 +92,7 @@ public partial class FileOperationLogModel
         FileHash = model.FileHash;
         UserId = model.UserId;
         UserName = model.UserName;
+        ExternalUserId = model.ExternalUserId;
         ClientIp = model.ClientIp;
         UserAgent = model.UserAgent;
         Success = model.Success;

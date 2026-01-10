@@ -122,6 +122,14 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
     [BindColumn("UserName", "操作用户名", "")]
     public String? UserName { get => _UserName; set { if (OnPropertyChanging("UserName", value)) { _UserName = value; OnPropertyChanged("UserName"); } } }
 
+    private String? _ExternalUserId;
+    /// <summary>外部用户关联ID（由请求方传递）</summary>
+    [DisplayName("外部用户关联ID（由请求方传递）")]
+    [Description("外部用户关联ID（由请求方传递）")]
+    [DataObjectField(false, false, true, 100)]
+    [BindColumn("ExternalUserId", "外部用户关联ID（由请求方传递）", "")]
+    public String? ExternalUserId { get => _ExternalUserId; set { if (OnPropertyChanging("ExternalUserId", value)) { _ExternalUserId = value; OnPropertyChanged("ExternalUserId"); } } }
+
     private String? _ClientIp;
     /// <summary>客户端IP</summary>
     [DisplayName("客户端IP")]
@@ -204,6 +212,7 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
         FileHash = model.FileHash;
         UserId = model.UserId;
         UserName = model.UserName;
+        ExternalUserId = model.ExternalUserId;
         ClientIp = model.ClientIp;
         UserAgent = model.UserAgent;
         Success = model.Success;
@@ -235,6 +244,7 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
             "FileHash" => _FileHash,
             "UserId" => _UserId,
             "UserName" => _UserName,
+            "ExternalUserId" => _ExternalUserId,
             "ClientIp" => _ClientIp,
             "UserAgent" => _UserAgent,
             "Success" => _Success,
@@ -261,6 +271,7 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
                 case "FileHash": _FileHash = Convert.ToString(value); break;
                 case "UserId": _UserId = value.ToLong(); break;
                 case "UserName": _UserName = Convert.ToString(value); break;
+                case "ExternalUserId": _ExternalUserId = Convert.ToString(value); break;
                 case "ClientIp": _ClientIp = Convert.ToString(value); break;
                 case "UserAgent": _UserAgent = Convert.ToString(value); break;
                 case "Success": _Success = value.ToBoolean(); break;
@@ -287,7 +298,7 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
         if (id < 0) return null;
 
         // 实体缓存
-        if (Meta.Session.Count < 1000) return Meta.Cache.Find(e => e.Id == id);
+        if (Meta.Session.Count < MaxCacheCount) return Meta.Cache.Find(e => e.Id == id);
 
         // 单对象缓存
         return Meta.SingleCache[id];
@@ -364,6 +375,9 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
         /// <summary>操作用户名</summary>
         public static readonly Field UserName = FindByName("UserName");
 
+        /// <summary>外部用户关联ID（由请求方传递）</summary>
+        public static readonly Field ExternalUserId = FindByName("ExternalUserId");
+
         /// <summary>客户端IP</summary>
         public static readonly Field ClientIp = FindByName("ClientIp");
 
@@ -429,6 +443,9 @@ public partial class FileOperationLog : IFileOperationLog, IEntity<IFileOperatio
 
         /// <summary>操作用户名</summary>
         public const String UserName = "UserName";
+
+        /// <summary>外部用户关联ID（由请求方传递）</summary>
+        public const String ExternalUserId = "ExternalUserId";
 
         /// <summary>客户端IP</summary>
         public const String ClientIp = "ClientIp";

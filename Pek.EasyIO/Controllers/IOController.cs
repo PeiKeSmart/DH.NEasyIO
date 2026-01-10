@@ -64,11 +64,20 @@ public class IOController : ApiControllerBase
     [ApiAuth]  // 上传需要API鉴权
     [HttpPut]
     public async Task<Object> Put(IFormFile file, [FromForm] String remark,
-        [FromForm] String category = null, [FromForm] String businessType = null, 
+        [FromForm] String category = null, [FromForm] String businessType = null,
         [FromForm] String businessId = null, [FromForm] Int32 accessLevel = 0,
         [FromForm] String directory = null)
     {
         var result = new DGResult();
+
+        // 验证外部用户ID（必填）
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        if (externalUserId.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
 
         // 验证是否上传了文件
         if (file == null || file.Length == 0)
@@ -112,11 +121,11 @@ public class IOController : ApiControllerBase
         // 限制原文件名长度，避免路径过长
         if (originalNameWithoutExt.Length > 50)
             originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
-        
+
         var now = DateTime.Now;
         var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
         var storageName = $"{now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
-        
+
         // 清理 category 参数，防止路径穿越攻击（../、..\等）
         var safeCategory = category;
         if (!category.IsNullOrEmpty())
@@ -127,7 +136,7 @@ public class IOController : ApiControllerBase
             safeCategory = System.Text.RegularExpressions.Regex.Replace(safeCategory, @"_{2,}", "_");
             safeCategory = safeCategory.Trim('_');
         }
-        
+
         // 清理 directory 参数，防止路径穿越攻击
         var safeDirectory = directory;
         if (!directory.IsNullOrEmpty())
@@ -139,7 +148,7 @@ public class IOController : ApiControllerBase
             safeDirectory = System.Text.RegularExpressions.Regex.Replace(safeDirectory, @"/{2,}", "/");
             safeDirectory = safeDirectory.Trim('_').Trim('/');
         }
-        
+
         // 根据是否指定 directory 决定存储路径结构
         String relativePath;
         if (!safeDirectory.IsNullOrEmpty())
@@ -158,7 +167,7 @@ public class IOController : ApiControllerBase
             var category_path = safeCategory.IsNullOrEmpty() ? "" : safeCategory + "/";
             relativePath = category_path + datePath + "/" + storageName;
         }
-        
+
         // 保存文件到项目存储目录
         var fileName = GetProjectFilePath(project, relativePath);
         fileName.EnsureDirectory(true);
@@ -271,7 +280,7 @@ public class IOController : ApiControllerBase
             if (entry != null)
             {
                 var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
-                FileOperationLog.Log(entry, "Upload", success, errorMessage, null, duration);
+                FileOperationLog.Log(entry, "Upload", success, errorMessage, null, duration, externalUserId);
             }
         }
 
@@ -293,12 +302,12 @@ public class IOController : ApiControllerBase
         // 1. 尝试从缓存获取文件元数据（缓存 5 分钟）
         var cacheKey = $"file_meta_{id}";
         var cached = _cache.Get<(FileEntry entry, FileProject project, String filePath, DateTime lastModified)>(cacheKey);
-        
+
         FileEntry entry;
         FileProject fileProject;
         String filePath;
         DateTime lastModified;
-        
+
         if (cached != default)
         {
             (entry, fileProject, filePath, lastModified) = cached;
@@ -315,7 +324,7 @@ public class IOController : ApiControllerBase
             filePath = GetProjectFilePath(fileProject, entry.RelativePath);
             var fileInfo = new FileInfo(filePath);
             if (!fileInfo.Exists) throw new Exception("物理文件不存在");
-            
+
             lastModified = fileInfo.LastWriteTimeUtc;
 
             // 存入缓存（5分钟过期）
@@ -351,12 +360,12 @@ public class IOController : ApiControllerBase
         // 4. HTTP 缓存验证（优化字符串操作）
         var etag = $"\"{entry.Hash}-{lastModified.Ticks}\"";
         var requestETag = Request.Headers["If-None-Match"].ToString();
-        
+
         if (requestETag == etag)
             return StatusCode(304);
-        
+
         var requestModifiedSince = Request.Headers["If-Modified-Since"].ToString();
-        if (!requestModifiedSince.IsNullOrEmpty() && 
+        if (!requestModifiedSince.IsNullOrEmpty() &&
             DateTime.TryParse(requestModifiedSince, out var modifiedSince) &&
             lastModified <= modifiedSince.ToUniversalTime())
             return StatusCode(304);
@@ -364,7 +373,7 @@ public class IOController : ApiControllerBase
         // 6. 设置响应头（优化字符串操作）
         var contentType = entry.ContentType ?? "application/octet-stream";
         var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
-        
+
         Response.Headers.Append("Content-Disposition", $"{(inline ? "inline" : "attachment")}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
         Response.Headers.Append("ETag", etag);
         Response.Headers.Append("Last-Modified", lastModified.ToString("R"));
@@ -380,7 +389,7 @@ public class IOController : ApiControllerBase
         try
         {
             var result = PhysicalFile(filePath, contentType, downloadFileName, enableRangeProcessing: true);
-            
+
             // 下载成功，记录日志（采样：前100次 + 之后每10次，SaveAsync 批量写入）
             var shouldLogSample = entry.DownloadCount < 100 || (entry.DownloadCount % 10) == 0;
             if (shouldLogSample)
@@ -401,7 +410,7 @@ public class IOController : ApiControllerBase
                 };
                 log.SaveAsync(3000);
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -438,6 +447,15 @@ public class IOController : ApiControllerBase
     {
         var result = new DGResult();
 
+        // 验证外部用户ID（必填）
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        if (externalUserId.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
+
         if (id <= 0)
         {
             result.ErrCode = 10000;
@@ -452,10 +470,11 @@ public class IOController : ApiControllerBase
             return result;
         }
 
+        FileEntry entry = null;
         try
         {
             // 查询原有文件记录
-            var entry = FileEntry.FindById(id);
+            entry = FileEntry.FindById(id);
             if (entry == null)
             {
                 result.ErrCode = 10001;
@@ -497,46 +516,46 @@ public class IOController : ApiControllerBase
                 return result;
             }
 
-        // 生成新的存储文件名（保持与原文件相同的目录结构）
-        var originalNameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
-        originalNameWithoutExt = System.Text.RegularExpressions.Regex.Replace(originalNameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
-        if (originalNameWithoutExt.Length > 50)
-            originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
+            // 生成新的存储文件名（保持与原文件相同的目录结构）
+            var originalNameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
+            originalNameWithoutExt = System.Text.RegularExpressions.Regex.Replace(originalNameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
+            if (originalNameWithoutExt.Length > 50)
+                originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
 
-        var now = DateTime.Now;
-        var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
-        var storageName = $"{now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
+            var now = DateTime.Now;
+            var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var storageName = $"{now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
 
-        // 保持原目录结构，只替换文件名
-        var oldRelativePath = entry.RelativePath;
-        var directory = Path.GetDirectoryName(oldRelativePath)?.Replace("\\", "/");
-        var relativePath = directory.IsNullOrEmpty() ? storageName : directory + "/" + storageName;
+            // 保持原目录结构，只替换文件名
+            var oldRelativePath = entry.RelativePath;
+            var directory = Path.GetDirectoryName(oldRelativePath)?.Replace("\\", "/");
+            var relativePath = directory.IsNullOrEmpty() ? storageName : directory + "/" + storageName;
 
-        // 保存新文件
-        var newFilePath = GetProjectFilePath(project, relativePath);
-        newFilePath.EnsureDirectory(true);
+            // 保存新文件
+            var newFilePath = GetProjectFilePath(project, relativePath);
+            newFilePath.EnsureDirectory(true);
 
-        String hash;
-        Int64 fileSize;
+            String hash;
+            Int64 fileSize;
 
-        using (var uploadStream = file.OpenReadStream())
-        using (var fs = new FileStream(newFilePath, FileMode.Create))
-        {
-            using var md5 = MD5.Create();
-            var buffer = new Byte[8192];
-            Int32 bytesRead;
-            fileSize = 0;
-
-            while ((bytesRead = await uploadStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            using (var uploadStream = file.OpenReadStream())
+            using (var fs = new FileStream(newFilePath, FileMode.Create))
             {
-                await fs.WriteAsync(buffer, 0, bytesRead);
-                md5.TransformBlock(buffer, 0, bytesRead, buffer, 0);
-                fileSize += bytesRead;
-            }
+                using var md5 = MD5.Create();
+                var buffer = new Byte[8192];
+                Int32 bytesRead;
+                fileSize = 0;
 
-            md5.TransformFinalBlock(buffer, 0, 0);
-            hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
-        }
+                while ((bytesRead = await uploadStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await fs.WriteAsync(buffer, 0, bytesRead);
+                    md5.TransformBlock(buffer, 0, bytesRead, buffer, 0);
+                    fileSize += bytesRead;
+                }
+
+                md5.TransformFinalBlock(buffer, 0, 0);
+                hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
+            }
 
             // 验证文件大小
             if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
@@ -547,42 +566,45 @@ public class IOController : ApiControllerBase
                 return result;
             }
 
-        // 删除旧物理文件
-        var oldFilePath = GetProjectFilePath(project, oldRelativePath);
-        if (System.IO.File.Exists(oldFilePath))
-        {
-            try
+            // 删除旧物理文件
+            var oldFilePath = GetProjectFilePath(project, oldRelativePath);
+            if (System.IO.File.Exists(oldFilePath))
             {
-                System.IO.File.Delete(oldFilePath);
+                try
+                {
+                    System.IO.File.Delete(oldFilePath);
+                }
+                catch (Exception ex)
+                {
+                    XTrace.WriteLine($"删除旧文件失败（继续执行）：{oldFilePath} - {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                XTrace.WriteLine($"删除旧文件失败（继续执行）：{oldFilePath} - {ex.Message}");
-            }
-        }
 
-        // 更新项目存储统计
-        var sizeDiff = fileSize - entry.Size;
-        project.UsedStorageSize += sizeDiff;
-        project.Update();
+            // 更新项目存储统计
+            var sizeDiff = fileSize - entry.Size;
+            project.UsedStorageSize += sizeDiff;
+            project.Update();
 
-        // 更新文件记录（保留ID、创建时间、下载次数等元数据）
-        entry.Name = storageName;
-        entry.OriginalName = originalFileName;
-        entry.Extension = ext;
-        entry.ContentType = GetContentType(ext);
-        entry.Size = fileSize;
-        entry.Hash = hash;
-        entry.RelativePath = relativePath;
-        entry.UpdateTime = now;
-        entry.UpdateIP = GetClientIp();
-        if (!remark.IsNullOrEmpty())
-            entry.Remark = remark;
+            // 更新文件记录（保留ID、创建时间、下载次数等元数据）
+            entry.Name = storageName;
+            entry.OriginalName = originalFileName;
+            entry.Extension = ext;
+            entry.ContentType = GetContentType(ext);
+            entry.Size = fileSize;
+            entry.Hash = hash;
+            entry.RelativePath = relativePath;
+            entry.UpdateTime = now;
+            entry.UpdateIP = GetClientIp();
+            if (!remark.IsNullOrEmpty())
+                entry.Remark = remark;
 
-        entry.Update();
+            entry.Update();
 
-        // 清除缓存
-        _cache.Remove($"file_meta_{id}");
+            // 清除缓存
+            _cache.Remove($"file_meta_{id}");
+
+            // 记录操作日志
+            FileOperationLog.Log(entry, "Replace", true, null, null, 0, externalUserId);
 
             XTrace.WriteLine($"文件替换成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})，原大小：{entry.Size - sizeDiff}");
 
@@ -604,6 +626,13 @@ public class IOController : ApiControllerBase
         catch (Exception ex)
         {
             XTrace.WriteException(ex);
+
+            // 记录失败日志
+            if (entry != null)
+            {
+                FileOperationLog.Log(entry, "Replace", false, ex.Message, null, 0, externalUserId);
+            }
+
             result.Code = StateCode.Error;
             result.ErrCode = 50000;
             result.Message = $"文件替换失败：{ex.Message}";
@@ -619,6 +648,15 @@ public class IOController : ApiControllerBase
     public Object Delete(Int64 id)
     {
         var result = new DGResult();
+
+        // 验证外部用户ID（必填）
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        if (externalUserId.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
 
         if (id <= 0)
         {
@@ -655,7 +693,7 @@ public class IOController : ApiControllerBase
         // 获取物理文件路径
         var filePath = GetProjectFilePath(project, entry.RelativePath);
         XTrace.WriteLine($"获取物理文件路径：{filePath}");
-        
+
         var startTime = DateTime.Now;
         var success = false;
         var errorMessage = "";
@@ -706,7 +744,7 @@ public class IOController : ApiControllerBase
         {
             // 记录操作日志
             var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
-            FileOperationLog.Log(entry, "Delete", success, errorMessage, null, duration);
+            FileOperationLog.Log(entry, "Delete", success, errorMessage, null, duration, externalUserId);
         }
 
         return result;
@@ -807,49 +845,49 @@ public class IOController : ApiControllerBase
                 return result;
             }
 
-        var filePath = GetProjectFilePath(project, entry.RelativePath);
-        var fileExists = System.IO.File.Exists(filePath);
-        
-        FileInfo fileInfo = null;
-        String filePermissions = null;
-        String deleteTestResult = null;
+            var filePath = GetProjectFilePath(project, entry.RelativePath);
+            var fileExists = System.IO.File.Exists(filePath);
 
-        if (fileExists)
-        {
-            fileInfo = new FileInfo(filePath);
-            
-            // 测试文件权限
-            try
+            FileInfo fileInfo = null;
+            String filePermissions = null;
+            String deleteTestResult = null;
+
+            if (fileExists)
             {
-                using var fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.ReadWrite, System.IO.FileShare.None);
-                filePermissions = "可读写";
+                fileInfo = new FileInfo(filePath);
+
+                // 测试文件权限
+                try
+                {
+                    using var fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.ReadWrite, System.IO.FileShare.None);
+                    filePermissions = "可读写";
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    filePermissions = "无写权限";
+                }
+                catch (IOException)
+                {
+                    filePermissions = "文件被占用";
+                }
+                catch (Exception ex)
+                {
+                    filePermissions = $"未知错误：{ex.Message}";
+                }
+
+                // 测试删除（不实际删除）
+                try
+                {
+                    var testPath = filePath + ".delete_test";
+                    System.IO.File.Copy(filePath, testPath, true);
+                    System.IO.File.Delete(testPath);
+                    deleteTestResult = "删除测试成功";
+                }
+                catch (Exception ex)
+                {
+                    deleteTestResult = $"删除测试失败：{ex.Message}";
+                }
             }
-            catch (UnauthorizedAccessException)
-            {
-                filePermissions = "无写权限";
-            }
-            catch (IOException)
-            {
-                filePermissions = "文件被占用";
-            }
-            catch (Exception ex)
-            {
-                filePermissions = $"未知错误：{ex.Message}";
-            }
-            
-            // 测试删除（不实际删除）
-            try
-            {
-                var testPath = filePath + ".delete_test";
-                System.IO.File.Copy(filePath, testPath, true);
-                System.IO.File.Delete(testPath);
-                deleteTestResult = "删除测试成功";
-            }
-            catch (Exception ex)
-            {
-                deleteTestResult = $"删除测试失败：{ex.Message}";
-            }
-        }
 
             result.Code = StateCode.Ok;
             result.Message = "诊断信息获取成功";

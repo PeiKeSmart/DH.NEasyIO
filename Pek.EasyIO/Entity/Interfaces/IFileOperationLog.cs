@@ -47,6 +47,9 @@ public partial interface IFileOperationLog
     /// <summary>操作用户名</summary>
     String? UserName { get; set; }
 
+    /// <summary>外部用户关联ID（由请求方传递）</summary>
+    String? ExternalUserId { get; set; }
+
     /// <summary>客户端IP</summary>
     String? ClientIp { get; set; }
 

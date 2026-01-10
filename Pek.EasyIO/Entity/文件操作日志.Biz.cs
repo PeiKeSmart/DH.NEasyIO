@@ -110,8 +110,9 @@ public partial class FileOperationLog : DHEntityBase<FileOperationLog>
     /// <param name="errorMessage">错误信息</param>
     /// <param name="operationDetail">操作详情</param>
     /// <param name="duration">耗时（毫秒）</param>
+    /// <param name="externalUserId">外部用户关联ID</param>
     /// <returns></returns>
-    public static FileOperationLog Log(FileEntry entry, String operationType, Boolean success = true, String errorMessage = null, String operationDetail = null, Int32 duration = 0)
+    public static FileOperationLog Log(FileEntry entry, String operationType, Boolean success = true, String errorMessage = null, String operationDetail = null, Int32 duration = 0, String externalUserId = null)
     {
         var log = new FileOperationLog
         {
@@ -124,6 +125,7 @@ public partial class FileOperationLog : DHEntityBase<FileOperationLog>
             FilePath = entry?.RelativePath,
             FileSize = entry?.Size ?? 0,
             FileHash = entry?.Hash,
+            ExternalUserId = externalUserId,
             Success = success,
             ErrorMessage = errorMessage,
             Duration = duration
