@@ -197,26 +197,8 @@ public class IOController : ApiControllerBase
 
         try
         {
-            // 检查是否已存在相同文件（去重）
-            var existing = FileEntry.FindByHash(hash);
-            if (existing != null && !existing.IsDeleted)
-            {
-                XTrace.WriteLine($"文件已存在，返回已有记录：{existing.Id}");
-
-                return new
-                {
-                    id = existing.Id,
-                    name = existing.Name,
-                    originalName = existing.OriginalName,
-                    length = existing.Size,
-                    hash = existing.Hash,
-                    time = existing.CreateTime,
-                    isDirectory = false,
-                    duplicate = true
-                };
-            }
-
-            // 创建文件记录
+            // 创建文件记录（不再进行去重检查，每次上传都创建独立记录和物理文件）
+            // 这样确保：不同业务引用的文件互相独立，删除时不会影响其他引用
             var entry = new FileEntry
             {
                 Name = storageName,  // 存储的唯一文件名
@@ -251,7 +233,9 @@ public class IOController : ApiControllerBase
 
             XTrace.WriteLine($"文件上传成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})");
 
-            return new
+            result.Code = StateCode.Ok;
+            result.Message = "文件上传成功";
+            result.Data = new
             {
                 id = entry.Id,
                 name = entry.Name,
@@ -265,11 +249,15 @@ public class IOController : ApiControllerBase
                 accessLevel = entry.AccessLevel,
                 remark = entry.Remark
             };
+            return result;
         }
         catch (Exception ex)
         {
             XTrace.WriteException(ex);
-            throw;
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = ex.Message;
+            return result;
         }
     }
 
@@ -438,30 +426,72 @@ public class IOController : ApiControllerBase
     [HttpPost("{id}/replace")]
     public async Task<Object> Replace(Int64 id, IFormFile file, [FromForm] String remark = null)
     {
-        if (id <= 0) throw new Exception("无效的文件ID");
-        if (file == null || file.Length == 0) throw new Exception("未上传文件或文件为空");
+        var result = new DGResult();
 
-        // 查询原有文件记录
-        var entry = FileEntry.FindById(id);
-        if (entry == null) throw new Exception("文件记录不存在");
-        if (entry.IsDeleted) throw new Exception("文件已被删除");
+        if (id <= 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "无效的文件ID";
+            return result;
+        }
 
-        var project = FileProject.FindById(entry.ProjectId);
-        if (project == null) throw new Exception("文件所属项目不存在");
+        if (file == null || file.Length == 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "未上传文件或文件为空";
+            return result;
+        }
 
-        // 权限验证：只能替换本项目文件
-        var currentProject = this.GetCurrentProject();
-        if (currentProject?.Id != entry.ProjectId)
-            throw new Exception("无权替换其他项目的文件");
+        try
+        {
+            // 查询原有文件记录
+            var entry = FileEntry.FindById(id);
+            if (entry == null)
+            {
+                result.ErrCode = 10001;
+                result.Message = "文件记录不存在";
+                return result;
+            }
+            if (entry.IsDeleted)
+            {
+                result.ErrCode = 10002;
+                result.Message = "文件已被删除";
+                return result;
+            }
 
-        // 获取新文件信息
-        var originalFileName = Path.GetFileName(file.FileName);
-        if (originalFileName.IsNullOrEmpty())
-            throw new Exception("文件名不能为空");
+            var project = FileProject.FindById(entry.ProjectId);
+            if (project == null)
+            {
+                result.ErrCode = 10003;
+                result.Message = "文件所属项目不存在";
+                return result;
+            }
 
-        var ext = Path.GetExtension(originalFileName);
-        if (!ValidateExtension(ext, project))
-            throw new Exception($"不支持的文件类型：{ext}");
+            // 权限验证：只能替换本项目文件
+            var currentProject = this.GetCurrentProject();
+            if (currentProject?.Id != entry.ProjectId)
+            {
+                result.ErrCode = 10004;
+                result.Message = "无权替换其他项目的文件";
+                return result;
+            }
+
+            // 获取新文件信息
+            var originalFileName = Path.GetFileName(file.FileName);
+            if (originalFileName.IsNullOrEmpty())
+            {
+                result.ErrCode = 10000;
+                result.Message = "文件名不能为空";
+                return result;
+            }
+
+            var ext = Path.GetExtension(originalFileName);
+            if (!ValidateExtension(ext, project))
+            {
+                result.ErrCode = 10005;
+                result.Message = $"不支持的文件类型：{ext}";
+                return result;
+            }
 
         // 生成新的存储文件名（保持与原文件相同的目录结构）
         var originalNameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
@@ -504,12 +534,14 @@ public class IOController : ApiControllerBase
             hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
         }
 
-        // 验证文件大小
-        if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
-        {
-            System.IO.File.Delete(newFilePath);
-            throw new Exception($"文件大小超过限制（{project.MaxFileSize.ToGMK()}）");
-        }
+            // 验证文件大小
+            if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
+            {
+                System.IO.File.Delete(newFilePath);
+                result.ErrCode = 10006;
+                result.Message = $"文件大小超过限制（{project.MaxFileSize.ToGMK()}）";
+                return result;
+            }
 
         // 删除旧物理文件
         var oldFilePath = GetProjectFilePath(project, oldRelativePath);
@@ -548,47 +580,125 @@ public class IOController : ApiControllerBase
         // 清除缓存
         _cache.Remove($"file_meta_{id}");
 
-        XTrace.WriteLine($"文件替换成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})，原大小：{entry.Size - sizeDiff}");
+            XTrace.WriteLine($"文件替换成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})，原大小：{entry.Size - sizeDiff}");
 
-        return new
+            result.Code = StateCode.Ok;
+            result.Message = "文件替换成功";
+            result.Data = new
+            {
+                id = entry.Id,
+                name = entry.Name,
+                originalName = entry.OriginalName,
+                length = entry.Size,
+                hash = entry.Hash,
+                time = entry.UpdateTime,
+                downloadCount = entry.DownloadCount,
+                replaced = true
+            };
+            return result;
+        }
+        catch (Exception ex)
         {
-            id = entry.Id,
-            name = entry.Name,
-            originalName = entry.OriginalName,
-            length = entry.Size,
-            hash = entry.Hash,
-            time = entry.UpdateTime,
-            downloadCount = entry.DownloadCount,
-            replaced = true
-        };
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"文件替换失败：{ex.Message}";
+            return result;
+        }
     }
 
     /// <summary>删除文件对象</summary>
     /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
-    /// <exception cref="Exception"></exception>
     [ApiAuth]  // 删除需要API鉴权
     [HttpDelete]
-    public Int32 Delete(Int64 id)
+    public Object Delete(Int64 id)
     {
-        if (id <= 0) throw new Exception("无效的文件ID：" + id);
+        var result = new DGResult();
 
-        var entry = FileEntry.FindById(id);
-        if (entry == null) throw new Exception("文件记录不存在");
-
-        var project = FileProject.FindById(entry.ProjectId);
-        if (project == null) throw new Exception("文件所属项目不存在");
-
-        var filePath = GetProjectFilePath(project, entry.RelativePath);
-        if (System.IO.File.Exists(filePath))
+        if (id <= 0)
         {
-            System.IO.File.Delete(filePath);
+            result.ErrCode = 10000;
+            result.Message = "无效的文件ID";
+            return result;
         }
 
-        // 删除数据库记录
-        entry.Delete();
+        var entry = FileEntry.FindById(id);
+        if (entry == null)
+        {
+            result.ErrCode = 10001;
+            result.Message = "文件记录不存在";
+            return result;
+        }
+        if (entry.IsDeleted)
+        {
+            result.ErrCode = 10002;
+            result.Message = "文件已被删除";
+            return result;
+        }
+
+        var project = FileProject.FindById(entry.ProjectId);
+        if (project == null)
+        {
+            result.ErrCode = 10003;
+            result.Message = "文件所属项目不存在";
+            return result;
+        }
+
+        // 权限验证：只能删除本项目文件
+        var currentProject = this.GetCurrentProject();
+        if (currentProject?.Id != entry.ProjectId)
+        {
+            result.ErrCode = 10004;
+            result.Message = "无权删除其他项目的文件";
+            return result;
+        }
+
+        // 获取物理文件路径
+        var filePath = GetProjectFilePath(project, entry.RelativePath);
+        XTrace.WriteLine($"获取物理文件路径：{filePath}");
         
-        return 1;
+        try
+        {
+            // 先删除物理文件（如果存在）
+            if (System.IO.File.Exists(filePath))
+            {
+                System.IO.File.Delete(filePath);
+                XTrace.WriteLine($"物理文件已删除：{filePath}");
+            }
+            else
+            {
+                XTrace.WriteLine($"物理文件不存在（可能已被手动删除）：{filePath}");
+            }
+
+            // 再删除数据库记录
+            entry.Delete();
+
+            // 更新项目存储统计
+            if (project.UsedStorageSize >= entry.Size)
+                project.UsedStorageSize -= entry.Size;
+            else
+                project.UsedStorageSize = 0; // 防止负数
+            project.Update();
+
+            // 清除缓存
+            _cache.Remove($"file_meta_{id}");
+
+            XTrace.WriteLine($"文件删除成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})");
+
+            result.Code = StateCode.Ok;
+            result.Message = "文件删除成功";
+            result.Data = new { deletedId = entry.Id };
+            return result;
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"删除文件失败：{ex.Message}";
+            return result;
+        }
     }
 
     #region 辅助方法
@@ -650,6 +760,135 @@ public class IOController : ApiControllerBase
     private String GetClientIp()
     {
         return DHWeb.GetUserHost(HttpContext) ?? "unknown";
+    }
+
+    /// <summary>诊断文件信息（用于排查删除等问题）</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <returns></returns>
+    [ApiAuth]
+    [HttpGet("{id}/diagnose")]
+    public Object Diagnose(Int64 id)
+    {
+        var result = new DGResult();
+
+        if (id <= 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "无效的文件ID";
+            return result;
+        }
+
+        try
+        {
+            var entry = FileEntry.FindById(id);
+            if (entry == null)
+            {
+                result.ErrCode = 10001;
+                result.Message = "文件记录不存在";
+                return result;
+            }
+
+            var project = FileProject.FindById(entry.ProjectId);
+            if (project == null)
+            {
+                result.ErrCode = 10003;
+                result.Message = "文件所属项目不存在";
+                return result;
+            }
+
+        var filePath = GetProjectFilePath(project, entry.RelativePath);
+        var fileExists = System.IO.File.Exists(filePath);
+        
+        FileInfo fileInfo = null;
+        String filePermissions = null;
+        String deleteTestResult = null;
+
+        if (fileExists)
+        {
+            fileInfo = new FileInfo(filePath);
+            
+            // 测试文件权限
+            try
+            {
+                using var fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.ReadWrite, System.IO.FileShare.None);
+                filePermissions = "可读写";
+            }
+            catch (UnauthorizedAccessException)
+            {
+                filePermissions = "无写权限";
+            }
+            catch (IOException)
+            {
+                filePermissions = "文件被占用";
+            }
+            catch (Exception ex)
+            {
+                filePermissions = $"未知错误：{ex.Message}";
+            }
+            
+            // 测试删除（不实际删除）
+            try
+            {
+                var testPath = filePath + ".delete_test";
+                System.IO.File.Copy(filePath, testPath, true);
+                System.IO.File.Delete(testPath);
+                deleteTestResult = "删除测试成功";
+            }
+            catch (Exception ex)
+            {
+                deleteTestResult = $"删除测试失败：{ex.Message}";
+            }
+        }
+
+            result.Code = StateCode.Ok;
+            result.Message = "诊断信息获取成功";
+            result.Data = new
+            {
+                // 数据库信息
+                database = new
+                {
+                    id = entry.Id,
+                    name = entry.Name,
+                    originalName = entry.OriginalName,
+                    size = entry.Size,
+                    hash = entry.Hash,
+                    relativePath = entry.RelativePath,
+                    projectId = entry.ProjectId,
+                    projectName = entry.ProjectName,
+                    isDeleted = entry.IsDeleted,
+                    createTime = entry.CreateTime
+                },
+                // 物理文件信息
+                physical = new
+                {
+                    fullPath = filePath,
+                    exists = fileExists,
+                    actualSize = fileInfo?.Length,
+                    lastModified = fileInfo?.LastWriteTime,
+                    isReadOnly = fileInfo?.IsReadOnly,
+                    attributes = fileInfo?.Attributes.ToString(),
+                    permissions = filePermissions,
+                    deleteTest = deleteTestResult
+                },
+                // 项目信息
+                project = new
+                {
+                    id = project.Id,
+                    name = project.Name,
+                    storagePath = project.StoragePath,
+                    storagePathExists = Directory.Exists(project.StoragePath)
+                }
+            };
+            return result;
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"诊断失败：{ex.Message}";
+            return result;
+        }
     }
 
     #endregion
