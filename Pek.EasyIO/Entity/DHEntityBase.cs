@@ -80,19 +80,12 @@ public class DHEntityBase<TEntity> : Entity<TEntity>, BasePekModel where TEntity
     }
 
     /// <summary>
-    /// 软删除
+    /// 删除操作
     /// </summary>
     /// <returns></returns>
     protected override int OnDelete()
     {
-        var fi = Meta.Fields.FirstOrDefault(e => e.Name == "IsDeleted");
-
-        if (fi != null)
-        {
-            SetItem(fi.Name, true);
-            return base.OnUpdate();
-        }
-
+        // 直接物理删除
         return base.OnDelete();
     }
 

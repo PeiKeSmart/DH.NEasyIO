@@ -195,11 +195,16 @@ public class IOController : ApiControllerBase
 
         var fi = fileName.AsFile();
 
+        var startTime = DateTime.Now;
+        FileEntry entry = null;
+        var success = false;
+        var errorMessage = "";
+
         try
         {
             // 创建文件记录（不再进行去重检查，每次上传都创建独立记录和物理文件）
             // 这样确保：不同业务引用的文件互相独立，删除时不会影响其他引用
-            var entry = new FileEntry
+            entry = new FileEntry
             {
                 Name = storageName,  // 存储的唯一文件名
                 OriginalName = originalFileName,  // 用户上传时的原始文件名
@@ -231,6 +236,7 @@ public class IOController : ApiControllerBase
             project.UsedStorageSize += fileSize;
             project.Update();
 
+            success = true;
             XTrace.WriteLine($"文件上传成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})");
 
             result.Code = StateCode.Ok;
@@ -249,16 +255,27 @@ public class IOController : ApiControllerBase
                 accessLevel = entry.AccessLevel,
                 remark = entry.Remark
             };
-            return result;
         }
         catch (Exception ex)
         {
+            success = false;
+            errorMessage = ex.Message;
             XTrace.WriteException(ex);
             result.Code = StateCode.Error;
             result.ErrCode = 50000;
             result.Message = ex.Message;
-            return result;
         }
+        finally
+        {
+            // 记录操作日志
+            if (entry != null)
+            {
+                var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
+                FileOperationLog.Log(entry, "Upload", success, errorMessage, null, duration);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>下载文件（通过数据库ID）</summary>
@@ -285,19 +302,12 @@ public class IOController : ApiControllerBase
         if (cached != default)
         {
             (entry, fileProject, filePath, lastModified) = cached;
-            // 验证缓存数据仍然有效
-            if (entry.IsDeleted)
-            {
-                _cache.Remove(cacheKey);
-                throw new Exception("文件已被删除");
-            }
         }
         else
         {
-            // 缓存未命中，查询数据库
+            // 缓存未命中,查询数据库
             entry = FileEntry.FindById(id);
-            if (entry == null) throw new Exception($"文件不存在：{id}");
-            if (entry.IsDeleted) throw new Exception("文件已被删除");
+            if (entry == null) throw new Exception($"文件不存在:{id}");
 
             fileProject = FileProject.FindById(entry.ProjectId);
             if (fileProject == null) throw new Exception("文件所属项目不存在");
@@ -450,12 +460,6 @@ public class IOController : ApiControllerBase
             {
                 result.ErrCode = 10001;
                 result.Message = "文件记录不存在";
-                return result;
-            }
-            if (entry.IsDeleted)
-            {
-                result.ErrCode = 10002;
-                result.Message = "文件已被删除";
                 return result;
             }
 
@@ -630,12 +634,6 @@ public class IOController : ApiControllerBase
             result.Message = "文件记录不存在";
             return result;
         }
-        if (entry.IsDeleted)
-        {
-            result.ErrCode = 10002;
-            result.Message = "文件已被删除";
-            return result;
-        }
 
         var project = FileProject.FindById(entry.ProjectId);
         if (project == null)
@@ -658,6 +656,10 @@ public class IOController : ApiControllerBase
         var filePath = GetProjectFilePath(project, entry.RelativePath);
         XTrace.WriteLine($"获取物理文件路径：{filePath}");
         
+        var startTime = DateTime.Now;
+        var success = false;
+        var errorMessage = "";
+
         try
         {
             // 先删除物理文件（如果存在）
@@ -684,21 +686,30 @@ public class IOController : ApiControllerBase
             // 清除缓存
             _cache.Remove($"file_meta_{id}");
 
+            success = true;
             XTrace.WriteLine($"文件删除成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()})");
 
             result.Code = StateCode.Ok;
             result.Message = "文件删除成功";
             result.Data = new { deletedId = entry.Id };
-            return result;
         }
         catch (Exception ex)
         {
+            success = false;
+            errorMessage = ex.Message;
             XTrace.WriteException(ex);
             result.Code = StateCode.Error;
             result.ErrCode = 50000;
             result.Message = $"删除文件失败：{ex.Message}";
-            return result;
         }
+        finally
+        {
+            // 记录操作日志
+            var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
+            FileOperationLog.Log(entry, "Delete", success, errorMessage, null, duration);
+        }
+
+        return result;
     }
 
     #region 辅助方法
@@ -855,7 +866,6 @@ public class IOController : ApiControllerBase
                     relativePath = entry.RelativePath,
                     projectId = entry.ProjectId,
                     projectName = entry.ProjectName,
-                    isDeleted = entry.IsDeleted,
                     createTime = entry.CreateTime
                 },
                 // 物理文件信息

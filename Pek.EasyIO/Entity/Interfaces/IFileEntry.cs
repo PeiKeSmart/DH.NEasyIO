@@ -83,12 +83,6 @@ public partial interface IFileEntry
     /// <summary>其他元数据（JSON）</summary>
     String? Metadata { get; set; }
 
-    /// <summary>是否已删除</summary>
-    Boolean IsDeleted { get; set; }
-
-    /// <summary>删除时间</summary>
-    DateTime DeletedTime { get; set; }
-
     /// <summary>是否已病毒扫描</summary>
     Boolean IsScanned { get; set; }
 

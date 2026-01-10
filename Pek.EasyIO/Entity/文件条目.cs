@@ -18,12 +18,11 @@ namespace HlktechFileStorage.Entity;
 [DataObject]
 [Description("文件条目")]
 [BindIndex("IX_FileEntry_Hash", false, "Hash")]
-[BindIndex("IX_FileEntry_IsDeleted", false, "IsDeleted")]
-[BindIndex("IX_FileEntry_ProjectId_IsDeleted", false, "ProjectId,IsDeleted")]
-[BindIndex("IX_FileEntry_AccessLevel_IsDeleted", false, "AccessLevel,IsDeleted")]
+[BindIndex("IX_FileEntry_ProjectId", false, "ProjectId")]
+[BindIndex("IX_FileEntry_AccessLevel", false, "AccessLevel")]
 [BindIndex("IX_FileEntry_CreateTime", false, "CreateTime")]
-[BindIndex("IX_FileEntry_BusinessType_BusinessId_IsDeleted", false, "BusinessType,BusinessId,IsDeleted")]
-[BindIndex("IX_FileEntry_OwnerId_IsDeleted", false, "OwnerId,IsDeleted")]
+[BindIndex("IX_FileEntry_BusinessType_BusinessId", false, "BusinessType,BusinessId")]
+[BindIndex("IX_FileEntry_OwnerId", false, "OwnerId")]
 [BindTable("FileEntry", Description = "文件条目", ConnName = "EasyFile", DbType = DatabaseType.None)]
 public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 {
@@ -220,22 +219,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     [BindColumn("Metadata", "其他元数据（JSON）", "")]
     public String? Metadata { get => _Metadata; set { if (OnPropertyChanging("Metadata", value)) { _Metadata = value; OnPropertyChanged("Metadata"); } } }
 
-    private Boolean _IsDeleted;
-    /// <summary>是否已删除</summary>
-    [DisplayName("是否已删除")]
-    [Description("是否已删除")]
-    [DataObjectField(false, false, false, 0)]
-    [BindColumn("IsDeleted", "是否已删除", "")]
-    public Boolean IsDeleted { get => _IsDeleted; set { if (OnPropertyChanging("IsDeleted", value)) { _IsDeleted = value; OnPropertyChanged("IsDeleted"); } } }
-
-    private DateTime _DeletedTime;
-    /// <summary>删除时间</summary>
-    [DisplayName("删除时间")]
-    [Description("删除时间")]
-    [DataObjectField(false, false, true, 0)]
-    [BindColumn("DeletedTime", "删除时间", "")]
-    public DateTime DeletedTime { get => _DeletedTime; set { if (OnPropertyChanging("DeletedTime", value)) { _DeletedTime = value; OnPropertyChanged("DeletedTime"); } } }
-
     private Boolean _IsScanned;
     /// <summary>是否已病毒扫描</summary>
     [DisplayName("是否已病毒扫描")]
@@ -370,8 +353,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         Height = model.Height;
         Duration = model.Duration;
         Metadata = model.Metadata;
-        IsDeleted = model.IsDeleted;
-        DeletedTime = model.DeletedTime;
         IsScanned = model.IsScanned;
         IsEncrypted = model.IsEncrypted;
         EncryptionKey = model.EncryptionKey;
@@ -420,8 +401,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
             "Height" => _Height,
             "Duration" => _Duration,
             "Metadata" => _Metadata,
-            "IsDeleted" => _IsDeleted,
-            "DeletedTime" => _DeletedTime,
             "IsScanned" => _IsScanned,
             "IsEncrypted" => _IsEncrypted,
             "EncryptionKey" => _EncryptionKey,
@@ -465,8 +444,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
                 case "Height": _Height = value.ToInt(); break;
                 case "Duration": _Duration = value.ToInt(); break;
                 case "Metadata": _Metadata = Convert.ToString(value); break;
-                case "IsDeleted": _IsDeleted = value.ToBoolean(); break;
-                case "DeletedTime": _DeletedTime = value.ToDateTime(); break;
                 case "IsScanned": _IsScanned = value.ToBoolean(); break;
                 case "IsEncrypted": _IsEncrypted = value.ToBoolean(); break;
                 case "EncryptionKey": _EncryptionKey = Convert.ToString(value); break;
@@ -518,6 +495,60 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         return FindAll(_.Hash == hash);
     }
+
+    /// <summary>根据所属项目ID查找</summary>
+    /// <param name="projectId">所属项目ID</param>
+    /// <returns>实体列表</returns>
+    public static IList<FileEntry> FindAllByProjectId(Int64 projectId)
+    {
+        if (projectId < 0) return [];
+
+        // 实体缓存
+        if (Meta.Session.Count < 1000) return Meta.Cache.FindAll(e => e.ProjectId == projectId);
+
+        return FindAll(_.ProjectId == projectId);
+    }
+
+    /// <summary>根据访问级别（1=Public查找</summary>
+    /// <param name="accessLevel">访问级别（1=Public</param>
+    /// <returns>实体列表</returns>
+    public static IList<FileEntry> FindAllByAccessLevel(Int32 accessLevel)
+    {
+        if (accessLevel < 0) return [];
+
+        // 实体缓存
+        if (Meta.Session.Count < 1000) return Meta.Cache.FindAll(e => e.AccessLevel == accessLevel);
+
+        return FindAll(_.AccessLevel == accessLevel);
+    }
+
+    /// <summary>根据业务类型、业务ID查找</summary>
+    /// <param name="businessType">业务类型</param>
+    /// <param name="businessId">业务ID</param>
+    /// <returns>实体列表</returns>
+    public static IList<FileEntry> FindAllByBusinessTypeAndBusinessId(String? businessType, String? businessId)
+    {
+        if (businessType == null) return [];
+        if (businessId == null) return [];
+
+        // 实体缓存
+        if (Meta.Session.Count < 1000) return Meta.Cache.FindAll(e => e.BusinessType.EqualIgnoreCase(businessType) && e.BusinessId.EqualIgnoreCase(businessId));
+
+        return FindAll(_.BusinessType == businessType & _.BusinessId == businessId);
+    }
+
+    /// <summary>根据所有者用户ID查找</summary>
+    /// <param name="ownerId">所有者用户ID</param>
+    /// <returns>实体列表</returns>
+    public static IList<FileEntry> FindAllByOwnerId(Int64 ownerId)
+    {
+        if (ownerId < 0) return [];
+
+        // 实体缓存
+        if (Meta.Session.Count < 1000) return Meta.Cache.FindAll(e => e.OwnerId == ownerId);
+
+        return FindAll(_.OwnerId == ownerId);
+    }
     #endregion
 
     #region 高级查询
@@ -528,7 +559,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     /// <param name="businessType">业务类型</param>
     /// <param name="businessId">业务ID</param>
     /// <param name="ownerId">所有者用户ID</param>
-    /// <param name="isDeleted">是否已删除</param>
     /// <param name="isScanned">是否已病毒扫描</param>
     /// <param name="isEncrypted">是否加密存储</param>
     /// <param name="start">创建时间开始</param>
@@ -536,7 +566,7 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
     /// <param name="key">关键字</param>
     /// <param name="page">分页参数信息。可携带统计和数据权限扩展查询等信息</param>
     /// <returns>实体列表</returns>
-    public static IList<FileEntry> Search(String? hash, Int32 accessLevel, Int64 projectId, String? businessType, String? businessId, Int64 ownerId, Boolean? isDeleted, Boolean? isScanned, Boolean? isEncrypted, DateTime start, DateTime end, String key, PageParameter page)
+    public static IList<FileEntry> Search(String? hash, Int32 accessLevel, Int64 projectId, String? businessType, String? businessId, Int64 ownerId, Boolean? isScanned, Boolean? isEncrypted, DateTime start, DateTime end, String key, PageParameter page)
     {
         var exp = new WhereExpression();
 
@@ -546,7 +576,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
         if (!businessType.IsNullOrEmpty()) exp &= _.BusinessType == businessType;
         if (!businessId.IsNullOrEmpty()) exp &= _.BusinessId == businessId;
         if (ownerId >= 0) exp &= _.OwnerId == ownerId;
-        if (isDeleted != null) exp &= _.IsDeleted == isDeleted;
         if (isScanned != null) exp &= _.IsScanned == isScanned;
         if (isEncrypted != null) exp &= _.IsEncrypted == isEncrypted;
         exp &= _.CreateTime.Between(start, end);
@@ -631,12 +660,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>其他元数据（JSON）</summary>
         public static readonly Field Metadata = FindByName("Metadata");
-
-        /// <summary>是否已删除</summary>
-        public static readonly Field IsDeleted = FindByName("IsDeleted");
-
-        /// <summary>删除时间</summary>
-        public static readonly Field DeletedTime = FindByName("DeletedTime");
 
         /// <summary>是否已病毒扫描</summary>
         public static readonly Field IsScanned = FindByName("IsScanned");
@@ -754,12 +777,6 @@ public partial class FileEntry : IFileEntry, IEntity<IFileEntry>
 
         /// <summary>其他元数据（JSON）</summary>
         public const String Metadata = "Metadata";
-
-        /// <summary>是否已删除</summary>
-        public const String IsDeleted = "IsDeleted";
-
-        /// <summary>删除时间</summary>
-        public const String DeletedTime = "DeletedTime";
 
         /// <summary>是否已病毒扫描</summary>
         public const String IsScanned = "IsScanned";

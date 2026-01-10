@@ -83,12 +83,6 @@ public partial class FileEntryModel
     /// <summary>其他元数据（JSON）</summary>
     public String? Metadata { get; set; }
 
-    /// <summary>是否已删除</summary>
-    public Boolean IsDeleted { get; set; }
-
-    /// <summary>删除时间</summary>
-    public DateTime DeletedTime { get; set; }
-
     /// <summary>是否已病毒扫描</summary>
     public Boolean IsScanned { get; set; }
 
@@ -158,8 +152,6 @@ public partial class FileEntryModel
         Height = model.Height;
         Duration = model.Duration;
         Metadata = model.Metadata;
-        IsDeleted = model.IsDeleted;
-        DeletedTime = model.DeletedTime;
         IsScanned = model.IsScanned;
         IsEncrypted = model.IsEncrypted;
         EncryptionKey = model.EncryptionKey;

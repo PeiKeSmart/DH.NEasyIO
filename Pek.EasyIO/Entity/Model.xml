@@ -67,8 +67,6 @@
         <Column Name="Height" DataType="Int32" Description="图片高度" Default="0" />
         <Column Name="Duration" DataType="Int32" Description="视频/音频时长（秒）" Default="0" />
         <Column Name="Metadata" DataType="String" Length="2000" Description="其他元数据（JSON）" />
-        <Column Name="IsDeleted" DataType="Boolean" Description="是否已删除" Default="False" />
-        <Column Name="DeletedTime" DataType="DateTime" Description="删除时间" />
         <Column Name="IsScanned" DataType="Boolean" Description="是否已病毒扫描" Default="False" />
         <Column Name="IsEncrypted" DataType="Boolean" Description="是否加密存储" Default="False" />
         <Column Name="EncryptionKey" DataType="String" Length="100" Description="加密密钥ID" />
@@ -85,12 +83,11 @@
       </Columns>
       <Indexes>
         <Index Columns="Hash" />
-        <Index Columns="IsDeleted" />
-        <Index Columns="ProjectId,IsDeleted" />
-        <Index Columns="AccessLevel,IsDeleted" />
+        <Index Columns="ProjectId" />
+        <Index Columns="AccessLevel" />
         <Index Columns="CreateTime" />
-        <Index Columns="BusinessType,BusinessId,IsDeleted" />
-        <Index Columns="OwnerId,IsDeleted" />
+        <Index Columns="BusinessType,BusinessId" />
+        <Index Columns="OwnerId" />
       </Indexes>
     </Table>
     <Table Name="FileProject" Description="文件项目">
@@ -184,6 +181,37 @@
         <Index Columns="ShareUserId,CreateTime" />
         <Index Columns="ExpiresAt,IsActive" />
         <Index Columns="Status" />
+      </Indexes>
+    </Table>
+    <Table Name="FileOperationLog" Description="文件操作日志">
+      <Columns>
+        <Column Name="Id" DataType="Int64" Identity="True" PrimaryKey="True" Description="编号" />
+        <Column Name="FileId" DataType="Int64" Description="文件ID" />
+        <Column Name="FileName" DataType="String" Length="200" Description="文件名（冗余）" />
+        <Column Name="ProjectId" DataType="Int64" Description="项目ID" Default="0" />
+        <Column Name="ProjectName" DataType="String" Length="100" Description="项目名称" />
+        <Column Name="OperationType" DataType="String" Length="20" Nullable="False" Description="操作类型（Upload/Delete/Update/Move/Copy）" />
+        <Column Name="OperationDetail" DataType="String" Length="1000" Description="操作详情（JSON）" />
+        <Column Name="FilePath" DataType="String" Length="500" Description="文件路径" />
+        <Column Name="FileSize" DataType="Int64" Description="文件大小（字节）" Default="0" />
+        <Column Name="FileHash" DataType="String" Length="64" Description="文件哈希" />
+        <Column Name="UserId" DataType="Int64" Description="操作用户ID" Default="0" />
+        <Column Name="UserName" DataType="String" Length="100" Description="操作用户名" />
+        <Column Name="ClientIp" DataType="String" Description="客户端IP" />
+        <Column Name="UserAgent" DataType="String" Length="500" Description="用户代理" />
+        <Column Name="Success" DataType="Boolean" Description="是否成功" Default="True" />
+        <Column Name="ErrorMessage" DataType="String" Length="500" Description="错误信息" />
+        <Column Name="Duration" DataType="Int32" Description="操作耗时（毫秒）" Default="0" />
+        <Column Name="CreateTime" DataType="DateTime" Nullable="False" Description="操作时间" />
+        <Column Name="TraceId" DataType="String" Description="追踪ID" />
+        <Column Name="Remark" DataType="String" Length="500" Description="备注" />
+      </Columns>
+      <Indexes>
+        <Index Columns="FileId,CreateTime" />
+        <Index Columns="OperationType,CreateTime" />
+        <Index Columns="ProjectId,CreateTime" />
+        <Index Columns="UserId,CreateTime" />
+        <Index Columns="CreateTime" />
       </Indexes>
     </Table>
   </Tables>
