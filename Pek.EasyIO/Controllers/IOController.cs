@@ -293,7 +293,7 @@ public class IOController : ApiControllerBase
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
     [HttpGet("{id}")]
-    public async Task<IActionResult> Get(Int64 id, Boolean inline = false)
+    public async Task<IActionResult> Get(Int64 id, [FromQuery] Boolean inline = false)
     {
         if (id <= 0) throw new Exception("无效的文件ID");
 
