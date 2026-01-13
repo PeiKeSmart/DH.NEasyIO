@@ -277,7 +277,143 @@ Content-Type: application/octet-stream
 Content-Disposition: attachment; filename="test.jpg"
 ```
 
-### 4.3 删除文件
+### 4.3 重命名文件
+
+**接口地址：** `PATCH /api/v1/io/{id}/rename`
+
+**请求方法：** PATCH
+
+**鉴权要求：** 必需
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | Int64 | 是 | 文件数据库ID（路径参数） |
+| newOriginalName | String | 是 | 新的原始文件名（含扩展名，表单参数） |
+
+**功能说明：**
+- **同步重命名**：同时修改物理文件名和数据库记录（`Name`、`OriginalName`、`RelativePath`）
+- **保持目录结构**：仅修改文件名，保持原有目录结构不变
+- **自动去重**：重新生成带时间戳和 GUID 的唯一文件名，避免重名冲突
+- **扩展名验证**：新文件名的扩展名必须符合项目允许的扩展名规则
+- **权限控制**：仅能重命名本项目的文件
+- **异常回滚**：如果数据库更新失败，自动回滚物理文件重命名操作
+
+**请求示例：**
+
+```bash
+curl -X PATCH "https://your-api.com/api/v1/io/12345/rename" \
+  -H "X-Project-Code: ProjectA" \
+  -H "X-Timestamp: 1738339200" \
+  -H "X-Signature: a1b2c3..." \
+  -H "X-External-UserId: user_001" \
+  -F "newOriginalName=新产品手册_2024版.pdf"
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "message": "文件重命名成功",
+  "data": {
+    "id": 12345,
+    "oldName": "20251224093045_report_a1b2c3d4.pdf",
+    "newName": "20260113102030_新产品手册_2024版_b2c3d4e5.pdf",
+    "oldOriginalName": "report.pdf",
+    "newOriginalName": "新产品手册_2024版.pdf",
+    "oldRelativePath": "Document/2025/12/24/20251224093045_report_a1b2c3d4.pdf",
+    "newRelativePath": "Document/2025/12/24/20260113102030_新产品手册_2024版_b2c3d4e5.pdf",
+    "extension": ".pdf",
+    "renamed": true
+  }
+}
+```
+
+**错误码：**
+
+| 错误码 | 说明 |
+|--------|------|
+| 10000 | 参数错误（文件ID无效、新文件名为空、缺少必填请求头等） |
+| 10001 | 文件记录不存在 |
+| 10003 | 文件所属项目不存在 |
+| 10004 | 无权重命名其他项目的文件 |
+| 10005 | 不支持的文件类型 |
+| 10006 | 物理文件不存在，无法重命名 |
+| 10007 | 目标文件名已存在 |
+| 50000 | 服务器内部错误 |
+
+### 4.4 移动文件
+
+**接口地址：** `PATCH /api/v1/io/{id}/move`
+
+**请求方法：** PATCH
+
+**鉴权要求：** 必需
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | Int64 | 是 | 文件数据库ID（路径参数） |
+| targetDirectory | String | 是 | 目标目录路径（表单参数，如：Images/Products 或 Documents/2024） |
+| category | String | 否 | 新的分类标签（表单参数，如：Image、Document等） |
+
+**功能说明：**
+- **目录移动**：将文件从当前目录移动到指定的目标目录
+- **保持文件名**：移动后保持存储文件名（`Name`）和原始文件名（`OriginalName`）不变
+- **分类更新**：可选更新文件的分类标签（`Category`）
+- **路径安全**：自动清理路径中的特殊字符，防止路径穿越攻击
+- **重名检查**：检测目标位置是否已存在同名文件
+- **空目录清理**：移动后如果源目录为空，自动删除
+- **异常回滚**：如果数据库更新失败，自动回滚物理文件移动操作
+- **权限控制**：仅能移动本项目的文件
+
+**请求示例：**
+
+```bash
+curl -X PATCH "https://your-api.com/api/v1/io/12345/move" \
+  -H "X-Project-Code: ProjectA" \
+  -H "X-Timestamp: 1738339200" \
+  -H "X-Signature: a1b2c3..." \
+  -H "X-External-UserId: user_001" \
+  -F "targetDirectory=Images/Products/2024" \
+  -F "category=ProductImage"
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "message": "文件移动成功",
+  "data": {
+    "id": 12345,
+    "name": "20251224093045_product_a1b2c3d4.jpg",
+    "originalName": "产品图片.jpg",
+    "oldRelativePath": "Document/2025/12/24/20251224093045_product_a1b2c3d4.jpg",
+    "newRelativePath": "Images/Products/2024/20251224093045_product_a1b2c3d4.jpg",
+    "oldCategory": "Document",
+    "newCategory": "ProductImage",
+    "moved": true
+  }
+}
+```
+
+**错误码：**
+
+| 错误码 | 说明 |
+|--------|------|
+| 10000 | 参数错误（文件ID无效、目标目录为空、目标目录格式无效、缺少必填请求头等） |
+| 10001 | 文件记录不存在 |
+| 10003 | 文件所属项目不存在 |
+| 10004 | 无权移动其他项目的文件 |
+| 10006 | 物理文件不存在，无法移动 |
+| 10007 | 目标位置已存在同名文件 |
+| 50000 | 服务器内部错误 |
+
+### 4.5 删除文件
 
 **接口地址：** `DELETE /api/v1/io/{filename}`
 
@@ -291,7 +427,7 @@ Content-Disposition: attachment; filename="test.jpg"
 1  // 成功删除1个文件
 ```
 
-### 4.4 搜索文件
+### 4.5 搜索文件
 
 **接口地址：** `GET /api/v1/io/search`
 

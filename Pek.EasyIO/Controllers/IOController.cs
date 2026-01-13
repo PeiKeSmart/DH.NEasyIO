@@ -640,6 +640,408 @@ public class IOController : ApiControllerBase
         }
     }
 
+    /// <summary>重命名文件（同步修改物理文件名和原始文件名）</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <param name="newOriginalName">新的原始文件名（含扩展名）</param>
+    /// <returns></returns>
+    [ApiAuth]  // 重命名需要API鉴权
+    [HttpPatch("{id}/rename")]
+    public Object Rename(Int64 id, [FromForm] String newOriginalName)
+    {
+        var result = new DGResult();
+
+        // 验证外部用户ID（必填）
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        if (externalUserId.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
+
+        if (id <= 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "无效的文件ID";
+            return result;
+        }
+
+        // 验证新文件名
+        if (newOriginalName.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "新文件名不能为空";
+            return result;
+        }
+
+        // 清理文件名（只取文件名部分，忽略可能包含的路径）
+        newOriginalName = Path.GetFileName(newOriginalName);
+        if (newOriginalName.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "文件名格式无效";
+            return result;
+        }
+
+        var entry = FileEntry.FindById(id);
+        if (entry == null)
+        {
+            result.ErrCode = 10001;
+            result.Message = "文件记录不存在";
+            return result;
+        }
+
+        var project = FileProject.FindById(entry.ProjectId);
+        if (project == null)
+        {
+            result.ErrCode = 10003;
+            result.Message = "文件所属项目不存在";
+            return result;
+        }
+
+        // 权限验证：只能重命名本项目文件
+        var currentProject = this.GetCurrentProject();
+        if (currentProject?.Id != entry.ProjectId)
+        {
+            result.ErrCode = 10004;
+            result.Message = "无权重命名其他项目的文件";
+            return result;
+        }
+
+        // 验证新文件名的扩展名是否允许
+        var newExt = Path.GetExtension(newOriginalName);
+        if (!ValidateExtension(newExt, project))
+        {
+            result.ErrCode = 10005;
+            result.Message = $"不支持的文件类型：{newExt}";
+            return result;
+        }
+
+        var startTime = DateTime.Now;
+        var success = false;
+        var errorMessage = "";
+        var oldOriginalName = entry.OriginalName;
+        var oldName = entry.Name;
+        var oldRelativePath = entry.RelativePath;
+
+        // 获取旧物理文件路径
+        var oldFilePath = GetProjectFilePath(project, entry.RelativePath);
+        if (!System.IO.File.Exists(oldFilePath))
+        {
+            result.ErrCode = 10006;
+            result.Message = "物理文件不存在，无法重命名";
+            return result;
+        }
+
+        try
+        {
+            // 生成新的存储文件名（保留原有时间戳和GUID，只替换文件名部分）
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(newOriginalName);
+            // 清理文件名中的特殊字符
+            nameWithoutExt = System.Text.RegularExpressions.Regex.Replace(nameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
+            // 限制文件名长度
+            if (nameWithoutExt.Length > 50)
+                nameWithoutExt = nameWithoutExt.Substring(0, 50);
+
+            var now = DateTime.Now;
+            var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var newStorageName = $"{now:yyyyMMddHHmmss}_{nameWithoutExt}_{guidShort}{newExt}";
+
+            // 计算新的相对路径（保持目录结构，只替换文件名）
+            var directory = Path.GetDirectoryName(entry.RelativePath);
+            var newRelativePath = directory.IsNullOrEmpty() 
+                ? newStorageName 
+                : Path.Combine(directory, newStorageName).Replace("\\", "/");
+
+            // 获取新物理文件路径
+            var newFilePath = GetProjectFilePath(project, newRelativePath);
+
+            // 检查目标文件是否已存在
+            if (System.IO.File.Exists(newFilePath))
+            {
+                result.ErrCode = 10007;
+                result.Message = "目标文件名已存在";
+                return result;
+            }
+
+            // 确保目标目录存在
+            newFilePath.EnsureDirectory(true);
+
+            // 重命名物理文件
+            System.IO.File.Move(oldFilePath, newFilePath);
+            XTrace.WriteLine($"物理文件重命名成功：{oldFilePath} -> {newFilePath}");
+
+            // 更新数据库记录
+            entry.Name = newStorageName;
+            entry.OriginalName = newOriginalName;
+            entry.RelativePath = newRelativePath;
+            entry.Extension = newExt;
+            entry.ContentType = GetContentType(newExt);
+            entry.Update();
+
+            // 清除缓存
+            _cache.Remove($"file_meta_{id}");
+
+            success = true;
+            XTrace.WriteLine($"文件重命名成功：{entry.Id} - 原名：{oldOriginalName}（{oldName}），新名：{newOriginalName}（{newStorageName}）");
+
+            result.Code = StateCode.Ok;
+            result.Message = "文件重命名成功";
+            result.Data = new
+            {
+                id = entry.Id,
+                oldName,
+                newName = entry.Name,
+                oldOriginalName,
+                newOriginalName = entry.OriginalName,
+                oldRelativePath,
+                newRelativePath = entry.RelativePath,
+                extension = entry.Extension,
+                renamed = true
+            };
+        }
+        catch (Exception ex)
+        {
+            success = false;
+            errorMessage = ex.Message;
+            XTrace.WriteException(ex);
+
+            // 尝试回滚：如果物理文件已重命名但数据库更新失败，尝试恢复物理文件
+            var newFilePath = GetProjectFilePath(project, entry.RelativePath);
+            if (!System.IO.File.Exists(oldFilePath) && System.IO.File.Exists(newFilePath))
+            {
+                try
+                {
+                    System.IO.File.Move(newFilePath, oldFilePath);
+                    XTrace.WriteLine($"重命名失败，已回滚物理文件：{newFilePath} -> {oldFilePath}");
+                }
+                catch (Exception rollbackEx)
+                {
+                    XTrace.WriteException(rollbackEx);
+                    errorMessage += $"；回滚失败：{rollbackEx.Message}";
+                }
+            }
+
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"重命名文件失败：{ex.Message}";
+        }
+        finally
+        {
+            // 记录操作日志
+            var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
+            FileOperationLog.Log(entry, "Rename", success, errorMessage, null, duration, externalUserId);
+        }
+
+        return result;
+    }
+
+    /// <summary>移动文件到指定目录</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <param name="targetDirectory">目标目录路径（相对路径，如：Images/Products 或 Documents/2024）</param>
+    /// <param name="category">新的分类（可选，如：Image、Document等）</param>
+    /// <returns></returns>
+    [ApiAuth]  // 移动需要API鉴权
+    [HttpPatch("{id}/move")]
+    public Object Move(Int64 id, [FromForm] String targetDirectory, [FromForm] String category = null)
+    {
+        var result = new DGResult();
+
+        // 验证外部用户ID（必填）
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        if (externalUserId.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
+
+        if (id <= 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "无效的文件ID";
+            return result;
+        }
+
+        // 验证目标目录
+        if (targetDirectory.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "目标目录不能为空";
+            return result;
+        }
+
+        var entry = FileEntry.FindById(id);
+        if (entry == null)
+        {
+            result.ErrCode = 10001;
+            result.Message = "文件记录不存在";
+            return result;
+        }
+
+        var project = FileProject.FindById(entry.ProjectId);
+        if (project == null)
+        {
+            result.ErrCode = 10003;
+            result.Message = "文件所属项目不存在";
+            return result;
+        }
+
+        // 权限验证：只能移动本项目文件
+        var currentProject = this.GetCurrentProject();
+        if (currentProject?.Id != entry.ProjectId)
+        {
+            result.ErrCode = 10004;
+            result.Message = "无权移动其他项目的文件";
+            return result;
+        }
+
+        var startTime = DateTime.Now;
+        var success = false;
+        var errorMessage = "";
+        var oldRelativePath = entry.RelativePath;
+        var oldCategory = entry.Category;
+        String newRelativePath = null;
+
+        // 获取旧物理文件路径
+        var oldFilePath = GetProjectFilePath(project, entry.RelativePath);
+        if (!System.IO.File.Exists(oldFilePath))
+        {
+            result.ErrCode = 10006;
+            result.Message = "物理文件不存在，无法移动";
+            return result;
+        }
+
+        try
+        {
+            // 清理目标目录参数，防止路径穿越攻击
+            var safeTargetDirectory = targetDirectory;
+            // 移除路径分隔符和特殊字符，只保留字母数字中文横线下划线和斜杠
+            safeTargetDirectory = System.Text.RegularExpressions.Regex.Replace(safeTargetDirectory, @"[^\w\u4e00-\u9fa5\-/]", "_");
+            // 移除连续的下划线和斜杠
+            safeTargetDirectory = System.Text.RegularExpressions.Regex.Replace(safeTargetDirectory, @"_{2,}", "_");
+            safeTargetDirectory = System.Text.RegularExpressions.Regex.Replace(safeTargetDirectory, @"/{2,}", "/");
+            safeTargetDirectory = safeTargetDirectory.Trim('_').Trim('/');
+
+            if (safeTargetDirectory.IsNullOrEmpty())
+            {
+                result.ErrCode = 10000;
+                result.Message = "目标目录格式无效";
+                return result;
+            }
+
+            // 清理分类参数
+            var safeCategory = category;
+            if (!category.IsNullOrEmpty())
+            {
+                safeCategory = System.Text.RegularExpressions.Regex.Replace(category, @"[^\w\u4e00-\u9fa5\-]", "_");
+                safeCategory = System.Text.RegularExpressions.Regex.Replace(safeCategory, @"_{2,}", "_");
+                safeCategory = safeCategory.Trim('_');
+            }
+
+            // 计算新的相对路径（保持文件名不变，只改变目录）
+            var fileName = Path.GetFileName(entry.RelativePath);
+            newRelativePath = Path.Combine(safeTargetDirectory, fileName).Replace("\\", "/");
+
+            // 获取新物理文件路径
+            var newFilePath = GetProjectFilePath(project, newRelativePath);
+
+            // 检查目标文件是否已存在
+            if (System.IO.File.Exists(newFilePath))
+            {
+                result.ErrCode = 10007;
+                result.Message = "目标位置已存在同名文件";
+                return result;
+            }
+
+            // 确保目标目录存在
+            newFilePath.EnsureDirectory(true);
+
+            // 移动物理文件
+            System.IO.File.Move(oldFilePath, newFilePath);
+            XTrace.WriteLine($"物理文件移动成功：{oldFilePath} -> {newFilePath}");
+
+            // 尝试删除旧目录（如果为空）
+            try
+            {
+                var oldDirectory = Path.GetDirectoryName(oldFilePath);
+                if (!oldDirectory.IsNullOrEmpty() && Directory.Exists(oldDirectory))
+                {
+                    var remainingFiles = Directory.GetFileSystemEntries(oldDirectory);
+                    if (remainingFiles.Length == 0)
+                    {
+                        Directory.Delete(oldDirectory);
+                        XTrace.WriteLine($"已删除空目录：{oldDirectory}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                XTrace.WriteLine($"删除空目录失败（可忽略）：{ex.Message}");
+            }
+
+            // 更新数据库记录
+            entry.RelativePath = newRelativePath;
+            if (!safeCategory.IsNullOrEmpty())
+                entry.Category = safeCategory;
+            entry.Update();
+
+            // 清除缓存
+            _cache.Remove($"file_meta_{id}");
+
+            success = true;
+            XTrace.WriteLine($"文件移动成功：{entry.Id} - 从 {oldRelativePath}（{oldCategory}）移动到 {newRelativePath}（{entry.Category}）");
+
+            result.Code = StateCode.Ok;
+            result.Message = "文件移动成功";
+            result.Data = new
+            {
+                id = entry.Id,
+                name = entry.Name,
+                originalName = entry.OriginalName,
+                oldRelativePath,
+                newRelativePath = entry.RelativePath,
+                oldCategory,
+                newCategory = entry.Category,
+                moved = true
+            };
+        }
+        catch (Exception ex)
+        {
+            success = false;
+            errorMessage = ex.Message;
+            XTrace.WriteException(ex);
+
+            // 尝试回滚：如果物理文件已移动但数据库更新失败，尝试恢复物理文件
+            var newFilePath = GetProjectFilePath(project, newRelativePath ?? entry.RelativePath);
+            if (!System.IO.File.Exists(oldFilePath) && System.IO.File.Exists(newFilePath))
+            {
+                try
+                {
+                    System.IO.File.Move(newFilePath, oldFilePath);
+                    XTrace.WriteLine($"移动失败，已回滚物理文件：{newFilePath} -> {oldFilePath}");
+                }
+                catch (Exception rollbackEx)
+                {
+                    XTrace.WriteException(rollbackEx);
+                    errorMessage += $"；回滚失败：{rollbackEx.Message}";
+                }
+            }
+
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"移动文件失败：{ex.Message}";
+        }
+        finally
+        {
+            // 记录操作日志
+            var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
+            FileOperationLog.Log(entry, "Move", success, errorMessage, null, duration, externalUserId);
+        }
+
+        return result;
+    }
+
     /// <summary>删除文件对象</summary>
     /// <param name="id">文件数据库ID</param>
     /// <returns></returns>
