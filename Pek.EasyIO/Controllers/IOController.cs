@@ -293,11 +293,14 @@ public class IOController : ApiControllerBase
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
     [HttpGet("{id}")]
-    public async Task<IActionResult> Get(Int64 id, [FromQuery] Boolean inline = false)
+    public async Task<IActionResult> Get(Int64 id, Boolean inline = false)
     {
         if (id <= 0) throw new Exception("无效的文件ID");
 
         var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
+        
+        // 调试日志：输出 inline 参数值
+        XTrace.WriteLine($"文件访问：ID={id}, inline={inline}, ClientIP={clientIp}");
 
         // 1. 尝试从缓存获取文件元数据（缓存 5 分钟）
         var cacheKey = $"file_meta_{id}";
@@ -388,7 +391,8 @@ public class IOController : ApiControllerBase
         // 8. 返回文件（使用 PhysicalFile 获得最佳性能）
         try
         {
-            var result = PhysicalFile(filePath, contentType, downloadFileName, enableRangeProcessing: true);
+            // PhysicalFile 不传 fileDownloadName 参数，否则会强制设置 attachment
+            var result = PhysicalFile(filePath, contentType, enableRangeProcessing: true);
 
             // 下载成功，记录日志（采样：前100次 + 之后每10次，SaveAsync 批量写入）
             var shouldLogSample = entry.DownloadCount < 100 || (entry.DownloadCount % 10) == 0;
