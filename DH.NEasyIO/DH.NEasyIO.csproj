@@ -44,9 +44,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="DH.NCore" Version="4.17.2026.112-beta1105" />
-    <PackageReference Include="DH.NStardust.Extensions" Version="4.17.2026.112-beta1228" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0">
+    <PackageReference Include="DH.NCore" Version="4.17.2026.114-beta0317" />
+    <PackageReference Include="DH.NStardust.Extensions" Version="4.17.2026.116-beta0319" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
