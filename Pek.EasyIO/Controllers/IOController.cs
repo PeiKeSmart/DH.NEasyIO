@@ -7,8 +7,10 @@ using Microsoft.Extensions.Caching.Memory;
 
 using NewLife;
 using NewLife.Log;
+using NewLife.Serialization;
 
 using Pek.EasyIO.Auth;
+using Pek.EasyIO.Models;
 using Pek.EasyIO.Services;
 using Pek.Helpers;
 using Pek.Models;
@@ -25,6 +27,7 @@ public class IOController : ApiControllerBase
     private readonly IFileStorageService _storageService;
     private readonly IRateLimiter _rateLimiter;
     private readonly IMemoryCache _cache;
+    private readonly UploadTokenService _tokenService;
 
     /// <summary>实例化文件控制器</summary>
     public IOController(IRateLimiter rateLimiter, IMemoryCache cache)
@@ -32,6 +35,7 @@ public class IOController : ApiControllerBase
         _storageService = new LocalFileStorageService();
         _rateLimiter = rateLimiter;
         _cache = cache;
+        _tokenService = new UploadTokenService();
     }
 
     /// <summary>获取项目文件的存储路径</summary>
@@ -50,6 +54,116 @@ public class IOController : ApiControllerBase
             Directory.CreateDirectory(storageRoot);
 
         return Path.Combine(storageRoot, relativePath).GetFullPath();
+    }
+
+    /// <summary>生成上传令牌（业务系统调用，用于前端直传）</summary>
+    /// <param name="fileHash">文件哈希（MD5，32位）</param>
+    /// <param name="fileName">文件名</param>
+    /// <param name="fileSize">文件大小（字节）</param>
+    /// <param name="category">文件分类（可选）</param>
+    /// <param name="businessType">业务类型（可选）</param>
+    /// <param name="businessId">业务ID（可选）</param>
+    /// <param name="accessLevel">访问级别（可选，0=使用项目默认值）</param>
+    /// <param name="directory">指定存储目录（可选）</param>
+    /// <param name="expiresInMinutes">令牌有效期（分钟，默认60分钟）</param>
+    /// <returns></returns>
+    [ApiAuth]
+    [HttpPost("upload-token")]
+    public Object GenerateUploadToken(
+        [FromForm] String fileHash,
+        [FromForm] String fileName,
+        [FromForm] Int64 fileSize,
+        [FromForm] String category = null,
+        [FromForm] String businessType = null,
+        [FromForm] String businessId = null,
+        [FromForm] Int32 accessLevel = 0,
+        [FromForm] String directory = null,
+        [FromForm] Int32 expiresInMinutes = 60)
+    {
+        var result = new DGResult();
+
+        // 验证外部用户ID
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        if (externalUserId.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
+
+        // 获取当前项目
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        // 验证文件扩展名
+        var ext = Path.GetExtension(fileName);
+        if (!ValidateExtension(ext, project))
+        {
+            result.ErrCode = 10005;
+            result.Message = $"不支持的文件类型：{ext}";
+            return result;
+        }
+
+        // 验证文件大小
+        if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
+        {
+            result.ErrCode = 10008;
+            result.Message = $"文件大小超过限制（{project.MaxFileSize.ToGMK()}）";
+            return result;
+        }
+
+        try
+        {
+            // 生成令牌
+            var token = _tokenService.GenerateToken(
+                project.Id,
+                fileHash.ToLower(),
+                fileName,
+                fileSize,
+                externalUserId,
+                expiresInMinutes);
+
+            var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
+
+            // 缓存令牌相关元数据（用于合并时恢复上下文）
+            var tokenMetaKey = $"upload_token_meta_{fileHash.ToLower()}";
+            _cache.Set(tokenMetaKey, new
+            {
+                projectId = project.Id,
+                category,
+                businessType,
+                businessId,
+                accessLevel,
+                directory,
+                externalUserId
+            }, TimeSpan.FromMinutes(expiresInMinutes + 5)); // 多缓存5分钟容错
+
+            XTrace.WriteLine($"生成上传令牌：项目={project.Name}, 文件={fileName}, 哈希={fileHash}, 用户={externalUserId}");
+
+            result.Code = StateCode.Ok;
+            result.Message = "令牌生成成功";
+            result.Data = new UploadTokenResponse
+            {
+                UploadToken = token,
+                ChunkUploadUrl = "/api/v1/io/chunk",
+                MergeUrl = "/api/v1/io/chunk/merge",
+                StatusUrl = $"/api/v1/io/chunk/status/{fileHash}",
+                ExpiresAt = expiresAt,
+                FileHash = fileHash.ToLower(),
+                MaxChunkSize = 10 * 1024 * 1024,
+                Message = "请在前端使用 X-Upload-Token 请求头传递令牌"
+            };
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"生成令牌失败：{ex.Message}";
+        }
+
+        return result;
     }
 
     /// <summary>上传文件对象</summary>
@@ -1151,6 +1265,685 @@ public class IOController : ApiControllerBase
             // 记录操作日志
             var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
             FileOperationLog.Log(entry, "Delete", success, errorMessage, null, duration, externalUserId);
+        }
+
+        return result;
+    }
+
+    /// <summary>上传文件分片（支持大文件断点续传，支持令牌或API Key鉴权）</summary>
+    /// <param name="file">分片文件</param>
+    /// <param name="chunkIndex">分片索引（从0开始）</param>
+    /// <param name="totalChunks">总分片数</param>
+    /// <param name="fileHash">文件整体MD5（用于标识唯一文件）</param>
+    /// <param name="fileName">原始文件名</param>
+    /// <param name="fileSize">原始文件总大小（字节）</param>
+    /// <returns></returns>
+    [ApiAuth(AllowUploadToken = true)]
+    [HttpPost("chunk")]
+    public async Task<Object> UploadChunk(
+        IFormFile file,
+        [FromForm] Int32 chunkIndex,
+        [FromForm] Int32 totalChunks,
+        [FromForm] String fileHash,
+        [FromForm] String fileName,
+        [FromForm] Int64 fileSize)
+    {
+        var result = new DGResult();
+
+        // 获取项目信息（已通过 [ApiAuth] 验证）
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        // 获取外部用户ID和令牌信息
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        var authMode = HttpContext.Items["AuthMode"]?.ToString();
+        
+        // 令牌模式需验证文件哈希
+        if (authMode == "UploadToken")
+        {
+            var principal = HttpContext.Items["TokenPrincipal"] as System.Security.Claims.ClaimsPrincipal;
+            if (principal != null)
+            {
+                var tokenFileHash = _tokenService.GetFileHash(principal);
+                if (tokenFileHash.IsNullOrEmpty() || !tokenFileHash.Equals(fileHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.ErrCode = 10101;
+                    result.Message = "令牌与文件哈希不匹配";
+                    return result;
+                }
+                
+                // 从令牌获取用户ID
+                externalUserId = _tokenService.GetExternalUserId(principal);
+            }
+        }
+        else if (externalUserId.IsNullOrEmpty())
+        {
+            // API Key 模式需要 X-External-UserId
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
+
+        // 参数验证
+        if (file == null || file.Length == 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "未上传分片文件或文件为空";
+            return result;
+        }
+
+        if (fileHash.IsNullOrEmpty() || fileHash.Length != 32)
+        {
+            result.ErrCode = 10000;
+            result.Message = "文件哈希无效（需要32位MD5）";
+            return result;
+        }
+
+        if (fileName.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "原始文件名不能为空";
+            return result;
+        }
+
+        if (chunkIndex < 0 || chunkIndex >= totalChunks)
+        {
+            result.ErrCode = 10000;
+            result.Message = $"分片索引无效：{chunkIndex}（总数：{totalChunks}）";
+            return result;
+        }
+
+        if (totalChunks <= 0 || totalChunks > 10000)
+        {
+            result.ErrCode = 10000;
+            result.Message = $"分片总数无效：{totalChunks}（允许范围：1-10000）";
+            return result;
+        }
+
+        // 验证文件总大小
+        if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
+        {
+            result.ErrCode = 10008;
+            result.Message = $"文件大小超过限制（{project.MaxFileSize.ToGMK()}）";
+            return result;
+        }
+
+        try
+        {
+            // 创建分片临时目录：StoragePath/Temp/Chunks/{fileHash}/
+            var chunkDir = Path.Combine(project.StoragePath, "Temp", "Chunks", fileHash);
+            if (!Directory.Exists(chunkDir))
+                Directory.CreateDirectory(chunkDir);
+
+            // 分片文件路径：{chunkIndex}.tmp
+            var chunkFilePath = Path.Combine(chunkDir, $"{chunkIndex}.tmp");
+
+            // 保存分片（带文件锁，防止重复上传）
+            using (var fs = new FileStream(chunkFilePath, FileMode.Create, FileAccess.Write, System.IO.FileShare.None))
+            {
+                await file.CopyToAsync(fs);
+            }
+
+            // 记录分片元数据（用于验证和合并）
+            var metaFilePath = Path.Combine(chunkDir, $"{chunkIndex}.meta");
+            var metaData = new
+            {
+                chunkIndex,
+                chunkSize = file.Length,
+                uploadTime = DateTime.Now,
+                fileName,
+                fileSize,
+                totalChunks
+            };
+            System.IO.File.WriteAllText(metaFilePath, metaData.ToJson());
+
+            XTrace.WriteLine($"分片上传成功：{fileHash} - 第 {chunkIndex + 1}/{totalChunks} 片（{file.Length.ToGMK()}）");
+
+            // 检查是否所有分片都已上传
+            var uploadedChunks = Directory.GetFiles(chunkDir, "*.tmp").Length;
+            var isComplete = uploadedChunks == totalChunks;
+
+            result.Code = StateCode.Ok;
+            result.Message = "分片上传成功";
+            result.Data = new
+            {
+                fileHash,
+                chunkIndex,
+                totalChunks,
+                uploadedChunks,
+                isComplete,
+                chunkSize = file.Length
+            };
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"分片上传失败：{ex.Message}";
+        }
+
+        return result;
+    }
+
+    /// <summary>合并文件分片（所有分片上传完成后调用，支持令牌或API Key鉴权）</summary>
+    /// <param name="fileHash">文件MD5</param>
+    /// <param name="fileName">原始文件名</param>
+    /// <param name="totalChunks">总分片数</param>
+    /// <param name="remark">备注说明（必填）</param>
+    /// <param name="category">文件分类（可选，令牌模式可为空）</param>
+    /// <param name="businessType">业务类型（可选）</param>
+    /// <param name="businessId">业务ID（可选）</param>
+    /// <param name="accessLevel">访问级别（可选，0=使用项目默认值）</param>
+    /// <param name="directory">指定存储目录（可选）</param>
+    /// <returns></returns>
+    [ApiAuth(AllowUploadToken = true)]
+    [HttpPost("chunk/merge")]
+    public async Task<Object> MergeChunks(
+        [FromForm] String fileHash,
+        [FromForm] String fileName,
+        [FromForm] Int32 totalChunks,
+        [FromForm] String remark,
+        [FromForm] String category = null,
+        [FromForm] String businessType = null,
+        [FromForm] String businessId = null,
+        [FromForm] Int32 accessLevel = 0,
+        [FromForm] String directory = null)
+    {
+        var result = new DGResult();
+
+        // 获取项目信息（已通过 [ApiAuth] 验证）
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        // 获取外部用户ID和令牌信息
+        var externalUserId = Request.Headers["X-External-UserId"].ToString();
+        var authMode = HttpContext.Items["AuthMode"]?.ToString();
+        
+        // 令牌模式处理
+        if (authMode == "UploadToken")
+        {
+            var principal = HttpContext.Items["TokenPrincipal"] as System.Security.Claims.ClaimsPrincipal;
+            if (principal != null)
+            {
+                // 验证文件哈希
+                var tokenFileHash = _tokenService.GetFileHash(principal);
+                if (tokenFileHash.IsNullOrEmpty() || !tokenFileHash.Equals(fileHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.ErrCode = 10101;
+                    result.Message = "令牌与文件哈希不匹配";
+                    return result;
+                }
+                
+                // 从令牌获取用户ID
+                externalUserId = _tokenService.GetExternalUserId(principal);
+                
+                // 从缓存恢复令牌元数据（category等参数）
+                var tokenMetaKey = $"upload_token_meta_{fileHash.ToLower()}";
+                var tokenMeta = _cache.Get<dynamic>(tokenMetaKey);
+                if (tokenMeta != null)
+                {
+                    // 优先使用生成令牌时的参数
+                    category = category.IsNullOrEmpty() ? tokenMeta.category : category;
+                    businessType = businessType.IsNullOrEmpty() ? tokenMeta.businessType : businessType;
+                    businessId = businessId.IsNullOrEmpty() ? tokenMeta.businessId : businessId;
+                    accessLevel = accessLevel == 0 ? tokenMeta.accessLevel : accessLevel;
+                    directory = directory.IsNullOrEmpty() ? tokenMeta.directory : directory;
+                }
+            }
+        }
+        else if (externalUserId.IsNullOrEmpty())
+        {
+            // API Key 模式需要 X-External-UserId
+            result.ErrCode = 10000;
+            result.Message = "缺少必填请求头：X-External-UserId";
+            return result;
+        }
+
+        // 参数验证
+        if (fileHash.IsNullOrEmpty() || fileHash.Length != 32)
+        {
+            result.ErrCode = 10000;
+            result.Message = "文件哈希无效";
+            return result;
+        }
+
+        if (fileName.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "原始文件名不能为空";
+            return result;
+        }
+
+        if (remark.IsNullOrEmpty())
+        {
+            result.ErrCode = 10000;
+            result.Message = "备注说明不能为空";
+            return result;
+        }
+
+        var startTime = DateTime.Now;
+        FileEntry entry = null;
+        var success = false;
+        var errorMessage = "";
+        String mergedFilePath = null;
+
+        try
+        {
+            // 分片临时目录
+            var chunkDir = Path.Combine(project.StoragePath, "Temp", "Chunks", fileHash);
+            if (!Directory.Exists(chunkDir))
+            {
+                result.ErrCode = 10009;
+                result.Message = "分片目录不存在，请先上传分片";
+                return result;
+            }
+
+            // 验证所有分片是否已上传
+            var chunkFiles = Directory.GetFiles(chunkDir, "*.tmp")
+                .OrderBy(f => Int32.Parse(Path.GetFileNameWithoutExtension(f)))
+                .ToArray();
+
+            if (chunkFiles.Length != totalChunks)
+            {
+                result.ErrCode = 10010;
+                result.Message = $"分片不完整：已上传 {chunkFiles.Length}/{totalChunks} 片";
+                return result;
+            }
+
+            // 验证每个分片完整性（防止上传中断导致空文件）
+            for (var i = 0; i < chunkFiles.Length; i++)
+            {
+                var chunkFileInfo = new FileInfo(chunkFiles[i]);
+                if (chunkFileInfo.Length == 0)
+                {
+                    result.ErrCode = 10009;
+                    result.Message = $"分片 {i} 损坏（文件大小为0），请重新上传该分片";
+                    return result;
+                }
+            }
+
+            // 验证文件扩展名
+            var ext = Path.GetExtension(fileName);
+            if (!ValidateExtension(ext, project))
+                throw new Exception($"不支持的文件类型：{ext}");
+
+            // 生成存储文件名和路径（同普通上传逻辑）
+            var originalNameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+            originalNameWithoutExt = System.Text.RegularExpressions.Regex.Replace(originalNameWithoutExt, @"[^\w\u4e00-\u9fa5\-_]", "_");
+            if (originalNameWithoutExt.Length > 50)
+                originalNameWithoutExt = originalNameWithoutExt.Substring(0, 50);
+
+            var now = DateTime.Now;
+            var guidShort = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var storageName = $"{now:yyyyMMddHHmmss}_{originalNameWithoutExt}_{guidShort}{ext}";
+
+            // 清理 category 和 directory 参数（同普通上传）
+            var safeCategory = category;
+            if (!category.IsNullOrEmpty())
+            {
+                safeCategory = System.Text.RegularExpressions.Regex.Replace(category, @"[^\w\u4e00-\u9fa5\-]", "_");
+                safeCategory = System.Text.RegularExpressions.Regex.Replace(safeCategory, @"_{2,}", "_");
+                safeCategory = safeCategory.Trim('_');
+            }
+
+            var safeDirectory = directory;
+            if (!directory.IsNullOrEmpty())
+            {
+                safeDirectory = System.Text.RegularExpressions.Regex.Replace(directory, @"[^\w\u4e00-\u9fa5\-/]", "_");
+                safeDirectory = System.Text.RegularExpressions.Regex.Replace(safeDirectory, @"_{2,}", "_");
+                safeDirectory = System.Text.RegularExpressions.Regex.Replace(safeDirectory, @"/{2,}", "/");
+                safeDirectory = safeDirectory.Trim('_').Trim('/');
+            }
+
+            // 生成相对路径
+            String relativePath;
+            if (!safeDirectory.IsNullOrEmpty())
+            {
+                relativePath = safeDirectory + "/" + storageName;
+            }
+            else
+            {
+                var datePath = $"{now:yyyy}/{now:MM}/{now:dd}";
+                var category_path = safeCategory.IsNullOrEmpty() ? "" : safeCategory + "/";
+                relativePath = category_path + datePath + "/" + storageName;
+            }
+
+            mergedFilePath = GetProjectFilePath(project, relativePath);
+            mergedFilePath.EnsureDirectory(true);
+
+            // 合并分片
+            Int64 totalSize = 0;
+            using (var mergedStream = new FileStream(mergedFilePath, FileMode.Create, FileAccess.Write, System.IO.FileShare.None))
+            using (var md5 = MD5.Create())
+            {
+                var buffer = new Byte[8192];
+
+                foreach (var chunkFile in chunkFiles)
+                {
+                    using var chunkStream = new FileStream(chunkFile, FileMode.Open, FileAccess.Read, System.IO.FileShare.Read);
+                    Int32 bytesRead;
+                    while ((bytesRead = await chunkStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                    {
+                        await mergedStream.WriteAsync(buffer, 0, bytesRead);
+                        md5.TransformBlock(buffer, 0, bytesRead, buffer, 0);
+                        totalSize += bytesRead;
+                    }
+                }
+
+                md5.TransformFinalBlock(buffer, 0, 0);
+                var calculatedHash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLower();
+
+                // 验证合并后的MD5是否匹配
+                if (calculatedHash != fileHash.ToLower())
+                {
+                    // 删除错误的合并文件
+                    System.IO.File.Delete(mergedFilePath);
+                    throw new Exception($"文件完整性校验失败：期望 {fileHash}，实际 {calculatedHash}");
+                }
+            }
+
+            // 验证文件大小
+            if (project.MaxFileSize > 0 && totalSize > project.MaxFileSize)
+            {
+                System.IO.File.Delete(mergedFilePath);
+                throw new Exception($"文件大小超过限制（{project.MaxFileSize.ToGMK()}）");
+            }
+
+            // 创建文件记录
+            entry = new FileEntry
+            {
+                Name = storageName,
+                OriginalName = fileName,
+                Extension = ext,
+                ContentType = GetContentType(ext),
+                Size = totalSize,
+                Hash = fileHash.ToLower(),
+
+                StorageType = "Local",
+                RelativePath = relativePath,
+
+                AccessLevel = accessLevel > 0 ? accessLevel : project.DefaultAccessLevel,
+
+                ProjectId = project.Id,
+                ProjectName = project.Name,
+                Category = safeCategory,
+
+                BusinessType = businessType,
+                BusinessId = businessId,
+
+                CreateIP = GetClientIp(),
+                CreateTime = DateTime.Now,
+                Remark = remark
+            };
+
+            entry.Insert();
+
+            // 更新项目存储统计
+            project.UsedStorageSize += totalSize;
+            project.Update();
+
+            // 后台异步清理分片临时文件和令牌缓存（避免阻塞响应）
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    // 延迟5秒确保文件句柄释放
+                    Thread.Sleep(5000);
+                    
+                    if (Directory.Exists(chunkDir))
+                    {
+                        Directory.Delete(chunkDir, true);
+                        XTrace.WriteLine($"已清理分片临时目录：{chunkDir}");
+                    }
+
+                    // 清理令牌元数据缓存
+                    var tokenMetaKey = $"upload_token_meta_{fileHash.ToLower()}";
+                    _cache.Remove(tokenMetaKey);
+                }
+                catch (Exception ex)
+                {
+                    XTrace.WriteLine($"清理分片临时目录失败（可忽略）：{ex.Message}");
+                }
+            });
+
+            success = true;
+            XTrace.WriteLine($"分片文件合并成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}，共 {totalChunks} 片)");
+
+            result.Code = StateCode.Ok;
+            result.Message = "文件合并成功";
+            result.Data = new
+            {
+                id = entry.Id,
+                name = entry.Name,
+                originalName = entry.OriginalName,
+                length = entry.Size,
+                hash = entry.Hash,
+                time = DateTime.Now,
+                isDirectory = false,
+                projectId = entry.ProjectId,
+                category = entry.Category,
+                accessLevel = entry.AccessLevel,
+                remark = entry.Remark,
+                totalChunks
+            };
+        }
+        catch (Exception ex)
+        {
+            success = false;
+            errorMessage = ex.Message;
+            XTrace.WriteException(ex);
+
+            // 清理失败的合并文件
+            if (!mergedFilePath.IsNullOrEmpty() && System.IO.File.Exists(mergedFilePath))
+            {
+                try
+                {
+                    System.IO.File.Delete(mergedFilePath);
+                }
+                catch { }
+            }
+
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"文件合并失败：{ex.Message}";
+        }
+        finally
+        {
+            // 记录操作日志
+            if (entry != null)
+            {
+                var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
+                FileOperationLog.Log(entry, "MergeChunks", success, errorMessage, null, duration, externalUserId);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>查询分片上传状态（用于断点续传，支持令牌或API Key鉴权）</summary>
+    /// <param name="fileHash">文件MD5</param>
+    /// <returns></returns>
+    [ApiAuth(AllowUploadToken = true)]
+    [HttpGet("chunk/status/{fileHash}")]
+    public Object GetChunkStatus(String fileHash)
+    {
+        var result = new DGResult();
+
+        if (fileHash.IsNullOrEmpty() || fileHash.Length != 32)
+        {
+            result.ErrCode = 10000;
+            result.Message = "文件哈希无效";
+            return result;
+        }
+
+        // 获取项目信息（已通过 [ApiAuth] 验证）
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        // 令牌模式：允许查询任意fileHash状态（支持断点续传）
+        // 注意：GetChunkStatus 不验证令牌fileHash，因为：
+        // 1. 令牌可能已过期但分片仍在
+        // 2. 前端需要查询状态决定是否续传
+        // 3. 状态查询不涉及敏感操作，仅返回已上传分片索引
+        var authMode = HttpContext.Items["AuthMode"]?.ToString();
+
+        try
+        {
+            var chunkDir = Path.Combine(project.StoragePath, "Temp", "Chunks", fileHash);
+            if (!Directory.Exists(chunkDir))
+            {
+                result.Code = StateCode.Ok;
+                result.Message = "未找到分片记录";
+                result.Data = new
+                {
+                    fileHash,
+                    exists = false,
+                    uploadedChunks = new Int32[0],
+                    uploadedCount = 0
+                };
+                return result;
+            }
+
+            // 获取已上传的分片索引
+            var uploadedChunks = Directory.GetFiles(chunkDir, "*.tmp")
+                .Select(f => Int32.Parse(Path.GetFileNameWithoutExtension(f)))
+                .OrderBy(x => x)
+                .ToArray();
+
+            // 读取第一个分片的元数据（获取总分片数等信息）
+            String fileName = null;
+            Int64 fileSize = 0;
+            Int32 totalChunks = 0;
+            DateTime? uploadStartTime = null;
+
+            var firstMetaFile = Directory.GetFiles(chunkDir, "*.meta").FirstOrDefault();
+            if (!firstMetaFile.IsNullOrEmpty())
+            {
+                try
+                {
+                    var metaJson = System.IO.File.ReadAllText(firstMetaFile);
+                    var meta = Newtonsoft.Json.JsonConvert.DeserializeAnonymousType(metaJson, new
+                    {
+                        fileName = "",
+                        fileSize = 0L,
+                        totalChunks = 0,
+                        uploadTime = DateTime.MinValue
+                    });
+                    fileName = meta.fileName;
+                    fileSize = meta.fileSize;
+                    totalChunks = meta.totalChunks;
+                    uploadStartTime = meta.uploadTime;
+                }
+                catch (Exception ex)
+                {
+                    XTrace.WriteLine($"读取分片元数据失败：{ex.Message}");
+                }
+            }
+
+            result.Code = StateCode.Ok;
+            result.Message = "查询成功";
+            result.Data = new
+            {
+                fileHash,
+                exists = true,
+                fileName,
+                fileSize,
+                totalChunks,
+                uploadedChunks,
+                uploadedCount = uploadedChunks.Length,
+                isComplete = totalChunks > 0 && uploadedChunks.Length == totalChunks,
+                uploadStartTime,
+                missingChunks = totalChunks > 0
+                    ? Enumerable.Range(0, totalChunks).Except(uploadedChunks).ToArray()
+                    : new Int32[0]
+            };
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"查询失败：{ex.Message}";
+        }
+
+        return result;
+    }
+
+    /// <summary>清理过期的分片临时文件（超过24小时未完成的上传）</summary>
+    /// <returns></returns>
+    [ApiAuth]
+    [HttpDelete("chunk/cleanup")]
+    public Object CleanupExpiredChunks()
+    {
+        var result = new DGResult();
+
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        try
+        {
+            var chunksRootDir = Path.Combine(project.StoragePath, "Temp", "Chunks");
+            if (!Directory.Exists(chunksRootDir))
+            {
+                result.Code = StateCode.Ok;
+                result.Message = "无需清理";
+                result.Data = new { cleanedCount = 0 };
+                return result;
+            }
+
+            var expireTime = DateTime.Now.AddHours(-24);
+            var cleanedCount = 0;
+            var totalSize = 0L;
+
+            // 遍历所有文件哈希目录
+            var hashDirs = Directory.GetDirectories(chunksRootDir);
+            foreach (var hashDir in hashDirs)
+            {
+                try
+                {
+                    var dirInfo = new DirectoryInfo(hashDir);
+                    // 检查最后修改时间
+                    if (dirInfo.LastWriteTime < expireTime)
+                    {
+                        // 计算目录大小
+                        var dirSize = dirInfo.GetFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+                        totalSize += dirSize;
+
+                        // 删除整个目录
+                        Directory.Delete(hashDir, true);
+                        cleanedCount++;
+
+                        XTrace.WriteLine($"清理过期分片目录：{hashDir}（{dirSize.ToGMK()}）");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    XTrace.WriteLine($"清理目录失败（继续）：{hashDir} - {ex.Message}");
+                }
+            }
+
+            result.Code = StateCode.Ok;
+            result.Message = $"清理完成，已删除 {cleanedCount} 个过期分片目录";
+            result.Data = new
+            {
+                cleanedCount,
+                totalSize,
+                totalSizeFormatted = totalSize.ToGMK()
+            };
+
+            XTrace.WriteLine($"分片清理完成：删除 {cleanedCount} 个目录，释放 {totalSize.ToGMK()} 空间");
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"清理失败：{ex.Message}";
         }
 
         return result;
