@@ -57,9 +57,15 @@ public class IOController : ApiControllerBase
     }
 
     /// <summary>生成上传令牌（业务系统调用，用于前端直传）</summary>
+    /// <remarks>
+    /// 支持两种模式：
+    /// 1. 新增模式（replaceFileId=0 或不传）：上传新文件
+    /// 2. 替换模式（replaceFileId>0）：替换指定ID的现有文件，保留原文件的元数据（ID、创建时间、下载次数等）
+    /// </remarks>
     /// <param name="fileHash">文件哈希（MD5，32位）</param>
     /// <param name="fileName">文件名</param>
     /// <param name="fileSize">文件大小（字节）</param>
+    /// <param name="replaceFileId">要替换的文件ID（可选，默认0为新增，大于0为替换指定文件）</param>
     /// <param name="category">文件分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
     /// <param name="businessId">业务ID（可选）</param>
@@ -73,6 +79,7 @@ public class IOController : ApiControllerBase
         [FromForm] String fileHash,
         [FromForm] String fileName,
         [FromForm] Int64 fileSize,
+        [FromForm] Int64 replaceFileId = 0,
         [FromForm] String category = null,
         [FromForm] String businessType = null,
         [FromForm] String businessId = null,
@@ -95,6 +102,26 @@ public class IOController : ApiControllerBase
         var project = this.GetCurrentProject();
         if (project == null)
             throw new Exception("无法获取项目信息");
+
+        // 替换模式：验证原文件是否存在且有权限
+        FileEntry existingEntry = null;
+        if (replaceFileId > 0)
+        {
+            existingEntry = FileEntry.FindById(replaceFileId);
+            if (existingEntry == null)
+            {
+                result.ErrCode = 10001;
+                result.Message = "要替换的文件记录不存在";
+                return result;
+            }
+
+            if (existingEntry.ProjectId != project.Id)
+            {
+                result.ErrCode = 10004;
+                result.Message = "无权替换其他项目的文件";
+                return result;
+            }
+        }
 
         // 验证文件扩展名
         var ext = Path.GetExtension(fileName);
@@ -131,6 +158,7 @@ public class IOController : ApiControllerBase
             _cache.Set(tokenMetaKey, new
             {
                 projectId = project.Id,
+                replaceFileId,
                 category,
                 businessType,
                 businessId,
@@ -139,10 +167,10 @@ public class IOController : ApiControllerBase
                 externalUserId
             }, TimeSpan.FromMinutes(expiresInMinutes + 5)); // 多缓存5分钟容错
 
-            XTrace.WriteLine($"生成上传令牌：项目={project.Name}, 文件={fileName}, 哈希={fileHash}, 用户={externalUserId}");
+            XTrace.WriteLine($"生成上传令牌：项目={project.Name}, 文件={fileName}, 哈希={fileHash}, 用户={externalUserId}, 替换模式={replaceFileId > 0}");
 
             result.Code = StateCode.Ok;
-            result.Message = "令牌生成成功";
+            result.Message = replaceFileId > 0 ? "替换文件令牌生成成功" : "令牌生成成功";
             result.Data = new UploadTokenResponse
             {
                 UploadToken = token,
@@ -152,7 +180,9 @@ public class IOController : ApiControllerBase
                 ExpiresAt = expiresAt,
                 FileHash = fileHash.ToLower(),
                 MaxChunkSize = 10 * 1024 * 1024,
-                Message = "请在前端使用 X-Upload-Token 请求头传递令牌"
+                Message = replaceFileId > 0 
+                    ? $"替换模式：将替换文件ID={replaceFileId}，请在前端使用 X-Upload-Token 请求头传递令牌" 
+                    : "请在前端使用 X-Upload-Token 请求头传递令牌"
             };
         }
         catch (Exception ex)
@@ -166,7 +196,14 @@ public class IOController : ApiControllerBase
         return result;
     }
 
-    /// <summary>上传文件对象</summary>
+    /// <summary>上传文件对象（直接上传）</summary>
+    /// <remarks>
+    /// 适用于小文件上传。对于大文件（建议 >10MB），推荐使用分片上传方式：
+    /// 1. 生成令牌：GenerateUploadToken
+    /// 2. 分片上传：UploadChunk（多次）
+    /// 3. 合并文件：MergeChunks
+    /// 分片方式支持断点续传和进度显示，更适合大文件场景。
+    /// </remarks>
     /// <param name="file">上传的文件</param>
     /// <param name="category">文件分类（可选）</param>
     /// <param name="businessType">业务类型（可选）</param>
@@ -1271,6 +1308,10 @@ public class IOController : ApiControllerBase
     }
 
     /// <summary>上传文件分片（支持大文件断点续传，支持令牌或API Key鉴权）</summary>
+    /// <remarks>
+    /// 支持新增和替换两种模式，由生成令牌时的 replaceFileId 参数决定。
+    /// 分片上传流程：GenerateUploadToken → UploadChunk（多次） → MergeChunks
+    /// </remarks>
     /// <param name="file">分片文件</param>
     /// <param name="chunkIndex">分片索引（从0开始）</param>
     /// <param name="totalChunks">总分片数</param>
@@ -1428,6 +1469,11 @@ public class IOController : ApiControllerBase
     }
 
     /// <summary>合并文件分片（所有分片上传完成后调用，支持令牌或API Key鉴权）</summary>
+    /// <remarks>
+    /// 支持两种模式（由令牌中的 replaceFileId 决定）：
+    /// 1. 新增模式：合并后创建新文件记录
+    /// 2. 替换模式：合并后更新现有文件记录，删除旧物理文件，保留文件ID、创建时间、下载次数等元数据
+    /// </remarks>
     /// <param name="fileHash">文件MD5</param>
     /// <param name="fileName">原始文件名</param>
     /// <param name="totalChunks">总分片数</param>
@@ -1461,6 +1507,7 @@ public class IOController : ApiControllerBase
         // 获取外部用户ID和令牌信息
         var externalUserId = Request.Headers["X-External-UserId"].ToString();
         var authMode = HttpContext.Items["AuthMode"]?.ToString();
+        Int64 replaceFileId = 0; // 替换文件ID，从令牌元数据中读取
         
         // 令牌模式处理
         if (authMode == "UploadToken")
@@ -1480,7 +1527,7 @@ public class IOController : ApiControllerBase
                 // 从令牌获取用户ID
                 externalUserId = _tokenService.GetExternalUserId(principal);
                 
-                // 从缓存恢复令牌元数据（category等参数）
+                // 从缓存恢复令牌元数据（category、replaceFileId等参数）
                 var tokenMetaKey = $"upload_token_meta_{fileHash.ToLower()}";
                 var tokenMeta = _cache.Get<dynamic>(tokenMetaKey);
                 if (tokenMeta != null)
@@ -1491,6 +1538,7 @@ public class IOController : ApiControllerBase
                     businessId = businessId.IsNullOrEmpty() ? tokenMeta.businessId : businessId;
                     accessLevel = accessLevel == 0 ? tokenMeta.accessLevel : accessLevel;
                     directory = directory.IsNullOrEmpty() ? tokenMeta.directory : directory;
+                    replaceFileId = tokenMeta.replaceFileId ?? 0;
                 }
             }
         }
@@ -1652,38 +1700,91 @@ public class IOController : ApiControllerBase
                 throw new Exception($"文件大小超过限制（{project.MaxFileSize.ToGMK()}）");
             }
 
-            // 创建文件记录
-            entry = new FileEntry
+            // 替换模式：更新现有记录并删除旧文件
+            if (replaceFileId > 0)
             {
-                Name = storageName,
-                OriginalName = fileName,
-                Extension = ext,
-                ContentType = GetContentType(ext),
-                Size = totalSize,
-                Hash = fileHash.ToLower(),
+                entry = FileEntry.FindById(replaceFileId);
+                if (entry == null)
+                    throw new Exception("要替换的文件记录不存在");
 
-                StorageType = "Local",
-                RelativePath = relativePath,
+                if (entry.ProjectId != project.Id)
+                    throw new Exception("无权替换其他项目的文件");
 
-                AccessLevel = accessLevel > 0 ? accessLevel : project.DefaultAccessLevel,
+                // 删除旧物理文件
+                var oldFilePath = GetProjectFilePath(project, entry.RelativePath);
+                if (System.IO.File.Exists(oldFilePath))
+                {
+                    try
+                    {
+                        System.IO.File.Delete(oldFilePath);
+                        XTrace.WriteLine($"已删除旧文件：{oldFilePath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        XTrace.WriteLine($"删除旧文件失败（继续执行）：{oldFilePath} - {ex.Message}");
+                    }
+                }
 
-                ProjectId = project.Id,
-                ProjectName = project.Name,
-                Category = safeCategory,
+                // 更新项目存储统计（差值）
+                var sizeDiff = totalSize - entry.Size;
+                project.UsedStorageSize += sizeDiff;
+                project.Update();
 
-                BusinessType = businessType,
-                BusinessId = businessId,
+                // 更新文件记录（保留ID、创建时间、下载次数等元数据）
+                entry.Name = storageName;
+                entry.OriginalName = fileName;
+                entry.Extension = ext;
+                entry.ContentType = GetContentType(ext);
+                entry.Size = totalSize;
+                entry.Hash = fileHash.ToLower();
+                entry.RelativePath = relativePath;
+                entry.UpdateTime = now;
+                entry.UpdateIP = GetClientIp();
+                if (!remark.IsNullOrEmpty())
+                    entry.Remark = remark;
 
-                CreateIP = GetClientIp(),
-                CreateTime = DateTime.Now,
-                Remark = remark
-            };
+                entry.Update();
 
-            entry.Insert();
+                // 清除缓存
+                _cache.Remove($"file_meta_{replaceFileId}");
 
-            // 更新项目存储统计
-            project.UsedStorageSize += totalSize;
-            project.Update();
+                XTrace.WriteLine($"分片替换文件成功：ID={entry.Id}, 新大小={totalSize.ToGMK()}, 原大小={entry.Size - sizeDiff}");
+            }
+            else
+            {
+                // 新增模式：创建文件记录
+                entry = new FileEntry
+                {
+                    Name = storageName,
+                    OriginalName = fileName,
+                    Extension = ext,
+                    ContentType = GetContentType(ext),
+                    Size = totalSize,
+                    Hash = fileHash.ToLower(),
+
+                    StorageType = "Local",
+                    RelativePath = relativePath,
+
+                    AccessLevel = accessLevel > 0 ? accessLevel : project.DefaultAccessLevel,
+
+                    ProjectId = project.Id,
+                    ProjectName = project.Name,
+                    Category = safeCategory,
+
+                    BusinessType = businessType,
+                    BusinessId = businessId,
+
+                    CreateIP = GetClientIp(),
+                    CreateTime = DateTime.Now,
+                    Remark = remark
+                };
+
+                entry.Insert();
+
+                // 更新项目存储统计
+                project.UsedStorageSize += totalSize;
+                project.Update();
+            }
 
             // 后台异步清理分片临时文件和令牌缓存（避免阻塞响应）
             _ = Task.Run(() =>
@@ -1710,10 +1811,11 @@ public class IOController : ApiControllerBase
             });
 
             success = true;
-            XTrace.WriteLine($"分片文件合并成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}，共 {totalChunks} 片)");
+            var operationType = replaceFileId > 0 ? "替换" : "合并";
+            XTrace.WriteLine($"分片文件{operationType}成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}，共 {totalChunks} 片)");
 
             result.Code = StateCode.Ok;
-            result.Message = "文件合并成功";
+            result.Message = replaceFileId > 0 ? "文件替换成功" : "文件合并成功";
             result.Data = new
             {
                 id = entry.Id,
@@ -1756,7 +1858,8 @@ public class IOController : ApiControllerBase
             if (entry != null)
             {
                 var duration = (Int32)(DateTime.Now - startTime).TotalMilliseconds;
-                FileOperationLog.Log(entry, "MergeChunks", success, errorMessage, null, duration, externalUserId);
+                var operation = replaceFileId > 0 ? "ReplaceChunks" : "MergeChunks";
+                FileOperationLog.Log(entry, operation, success, errorMessage, null, duration, externalUserId);
             }
         }
 

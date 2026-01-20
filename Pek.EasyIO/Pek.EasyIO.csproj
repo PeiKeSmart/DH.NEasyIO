@@ -57,7 +57,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Pek.AspNetCore" Version="4.16.2026.107-beta0342" />
+    <PackageReference Include="Pek.AspNetCore" Version="4.17.2026.120-beta0247" />
     <PackageReference Include="Pek.NCubeUI" Version="4.16.2026.113-beta1126" />
   </ItemGroup>
 
