@@ -1,4 +1,5 @@
 ﻿using System.Security.Cryptography;
+using System.Text;
 
 using HlktechFileStorage.Entity;
 
@@ -28,6 +29,7 @@ public class IOController : ApiControllerBase
     private readonly IRateLimiter _rateLimiter;
     private readonly IMemoryCache _cache;
     private readonly UploadTokenService _tokenService;
+    private readonly ApiSignatureValidator _signatureValidator;
 
     /// <summary>实例化文件控制器</summary>
     public IOController(IRateLimiter rateLimiter, IMemoryCache cache)
@@ -36,6 +38,7 @@ public class IOController : ApiControllerBase
         _rateLimiter = rateLimiter;
         _cache = cache;
         _tokenService = new UploadTokenService();
+        _signatureValidator = new ApiSignatureValidator();
     }
 
     /// <summary>获取项目文件的存储路径</summary>
@@ -541,28 +544,222 @@ public class IOController : ApiControllerBase
             lastModified <= modifiedSince.ToUniversalTime())
             return StatusCode(304);
 
-        // 6. 设置响应头（优化字符串操作）
+        // 6. 返回文件内容（复用逻辑）
+        return await ReturnFileContent(entry, fileProject, filePath, lastModified, inline, clientIp, "Direct");
+    }
+
+    /// <summary>通过签名URL下载文件（用于私有文件的临时访问）</summary>
+    /// <param name="id">文件数据库ID</param>
+    /// <param name="inline">是否内联显示（预览）</param>
+    /// <param name="expires">过期时间戳（Unix秒）</param>
+    /// <param name="sign">HMAC签名</param>
+    /// <returns></returns>
+    [HttpGet("signed/{id}")]
+    public async Task<IActionResult> GetSigned(
+        Int64 id,
+        Boolean inline = false,
+        Int64 expires = 0,
+        String sign = null)
+    {
+        if (id <= 0)
+            return new JsonResult(new { error = "无效的文件ID" }) { StatusCode = 400 };
+
+        if (sign.IsNullOrEmpty() || expires <= 0)
+            return new JsonResult(new { error = "缺少签名参数" }) { StatusCode = 400 };
+
+        var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
+        XTrace.WriteLine($"签名文件访问：ID={id}, expires={expires}, ClientIP={clientIp}");
+
+        // 1. 验证时效
+        var expiresTime = DateTimeOffset.FromUnixTimeSeconds(expires);
+        if (expiresTime < DateTimeOffset.UtcNow)
+        {
+            XTrace.WriteLine($"签名已过期：文件{id}，过期时间{expires}");
+            return new JsonResult(new { error = "签名已过期", fileId = id }) { StatusCode = 401 };
+        }
+
+        // 2. 查询文件和项目
+        var entry = FileEntry.FindById(id);
+        if (entry == null)
+            return new JsonResult(new { error = "文件不存在", fileId = id }) { StatusCode = 404 };
+
+        var project = FileProject.FindById(entry.ProjectId);
+        if (project == null)
+            return new JsonResult(new { error = "文件所属项目不存在", fileId = id }) { StatusCode = 404 };
+
+        // 3. 验证签名（使用统一的签名算法）
+        var payload = $"{id}:{project.Id}:{expires}";
+        var expectedSign = _signatureValidator.ComputeSignature(payload, project.ApiSecret);
+
+        if (sign != expectedSign)
+        {
+            XTrace.WriteLine($"签名验证失败：文件{id}，期望{expectedSign}，实际{sign}");
+            return new JsonResult(new { error = "签名无效", fileId = id }) { StatusCode = 401 };
+        }
+
+        XTrace.WriteLine($"签名验证通过：文件{id}，项目{project.Name}");
+
+        // 4. 获取物理文件路径
+        var filePath = GetProjectFilePath(project, entry.RelativePath);
+        var fileInfo = new FileInfo(filePath);
+        if (!fileInfo.Exists)
+            return new JsonResult(new { error = "物理文件不存在", fileId = id }) { StatusCode = 404 };
+
+        // 5. IP限流检查
+        if (entry.IpRateLimitPerMinute > 0)
+        {
+            if (!_rateLimiter.CheckFileIpRateLimit(clientIp, entry.Id, entry.IpRateLimitPerMinute))
+                return StatusCode(429, new { error = "该文件访问过于频繁" });
+        }
+        else
+        {
+            if (!_rateLimiter.CheckIpRateLimit(clientIp))
+                return StatusCode(429, new { error = "请求过于频繁" });
+        }
+
+        // 6. 返回文件内容（复用逻辑）
+        return await ReturnFileContent(entry, project, filePath, fileInfo.LastWriteTimeUtc, inline, clientIp, "Signed");
+    }
+
+    /// <summary>生成签名下载URL（批量支持，用于前端直接加载私有文件）</summary>
+    /// <param name="fileIds">文件ID列表</param>
+    /// <param name="expiresInSeconds">签名有效期（秒），默认3600秒（1小时），最长7天</param>
+    /// <param name="baseUrl">EasyIO服务的公网访问地址（可选）</param>
+    /// <returns></returns>
+    [ApiAuth]
+    [HttpPost("signed-urls")]
+    public Object GenerateSignedUrls(
+        [FromForm] Int64[] fileIds,
+        [FromForm] Int32 expiresInSeconds = 3600,
+        [FromForm] String baseUrl = null)
+    {
+        var result = new DGResult();
+
+        if (fileIds == null || fileIds.Length == 0)
+        {
+            result.ErrCode = 10000;
+            result.Message = "文件ID列表不能为空";
+            return result;
+        }
+
+        // 限制最长7天
+        const Int32 maxExpires = 7 * 24 * 3600;
+        if (expiresInSeconds > maxExpires)
+        {
+            XTrace.WriteLine($"签名时效超过最大值，自动限制为7天：请求{expiresInSeconds}秒");
+            expiresInSeconds = maxExpires;
+        }
+
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        if (project.ApiSecret.IsNullOrEmpty())
+            throw new Exception($"项目 [{project.Name}] 未配置 ApiSecret，无法生成签名");
+
+        var expiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds).ToUnixTimeSeconds();
+        var urls = new List<Object>();
+
+        // 确定基础URL
+        var effectiveBaseUrl = baseUrl;
+        if (effectiveBaseUrl.IsNullOrEmpty())
+        {
+            // 从请求中推断
+            var scheme = Request.Scheme;
+            var host = Request.Host.Value;
+            effectiveBaseUrl = $"{scheme}://{host}";
+        }
+
+        foreach (var fileId in fileIds)
+        {
+            var entry = FileEntry.FindById(fileId);
+            if (entry == null)
+            {
+                XTrace.WriteLine($"文件不存在，跳过：{fileId}");
+                continue;
+            }
+
+            if (entry.ProjectId != project.Id)
+            {
+                XTrace.WriteLine($"文件不属于当前项目，跳过：{fileId}（项目{entry.ProjectId}）");
+                continue;
+            }
+
+            // 生成签名（使用统一的签名算法）
+            var payload = $"{fileId}:{project.Id}:{expiresAt}";
+            var signature = _signatureValidator.ComputeSignature(payload, project.ApiSecret);
+
+            var signedUrl = $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}";
+
+            urls.Add(new
+            {
+                fileId,
+                fileName = entry.OriginalName,
+                size = entry.Size,
+                contentType = entry.ContentType,
+                url = signedUrl,
+                previewUrl = $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}&inline=true",
+                expiresIn = expiresInSeconds,
+                expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiresAt).ToString("o")
+            });
+        }
+
+        XTrace.WriteLine($"生成签名URL成功：项目={project.Name}，文件数={urls.Count}，有效期={expiresInSeconds}秒");
+
+        result.Code = StateCode.Ok;
+        result.Message = $"成功生成{urls.Count}个签名URL";
+        result.Data = urls;
+        return result;
+    }
+
+    /// <summary>提取的文件返回逻辑（复用于直接访问和签名访问）</summary>
+    private async Task<IActionResult> ReturnFileContent(
+        FileEntry entry,
+        FileProject project,
+        String filePath,
+        DateTime lastModified,
+        Boolean inline,
+        String clientIp,
+        String accessType = "Direct")
+    {
+        var effectiveAccessLevel = Math.Max(project.DefaultAccessLevel, entry.AccessLevel);
+
+        // HTTP 缓存验证
+        var etag = $"\"{entry.Hash}-{lastModified.Ticks}\"";
+        var requestETag = Request.Headers["If-None-Match"].ToString();
+
+        if (requestETag == etag)
+            return StatusCode(304);
+
+        var requestModifiedSince = Request.Headers["If-Modified-Since"].ToString();
+        if (!requestModifiedSince.IsNullOrEmpty() &&
+            DateTime.TryParse(requestModifiedSince, out var modifiedSince) &&
+            lastModified <= modifiedSince.ToUniversalTime())
+            return StatusCode(304);
+
+        // 设置响应头
         var contentType = entry.ContentType ?? "application/octet-stream";
         var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
 
-        Response.Headers.Append("Content-Disposition", $"{(inline ? "inline" : "attachment")}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
+        Response.Headers.Append("Content-Disposition",
+            $"{(inline ? "inline" : "attachment")}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
         Response.Headers.Append("ETag", etag);
         Response.Headers.Append("Last-Modified", lastModified.ToString("R"));
-        Response.Headers.Append("Cache-Control", effectiveAccessLevel == 1 ? "public, max-age=3600" : "private, no-cache");
+        Response.Headers.Append("Cache-Control",
+            effectiveAccessLevel == 1 ? "public, max-age=3600" : "private, no-cache");
 
-        // 7. 异步更新下载计数（每次都计数，SaveAsync 批量写入减少数据库压力）
+        // 异步更新下载计数
         entry.DownloadCount++;
-        entry.SaveAsync(3000);  // 3秒内累积批量写入，配合 AdditionalFields 生成原子 SQL
+        entry.SaveAsync(3000);
 
-        XTrace.WriteLine($"文件下载：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}");
+        XTrace.WriteLine($"文件下载：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}) by {clientIp}, 访问方式={accessType}");
 
-        // 8. 返回文件（使用 PhysicalFile 获得最佳性能）
+        // 返回文件
         try
         {
-            // PhysicalFile 不传 fileDownloadName 参数，否则会强制设置 attachment
             var result = PhysicalFile(filePath, contentType, enableRangeProcessing: true);
 
-            // 下载成功，记录日志（采样：前100次 + 之后每10次，SaveAsync 批量写入）
+            // 记录日志（采样）
             var shouldLogSample = entry.DownloadCount < 100 || (entry.DownloadCount % 10) == 0;
             if (shouldLogSample)
             {
@@ -571,7 +768,7 @@ public class IOController : ApiControllerBase
                     FileId = entry.Id,
                     FileName = entry.Name,
                     ProjectId = entry.ProjectId,
-                    AccessType = "Direct",
+                    AccessType = accessType,
                     ClientIp = clientIp,
                     UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
                     Referer = Request.Headers["Referer"].FirstOrDefault(),
@@ -587,13 +784,13 @@ public class IOController : ApiControllerBase
         }
         catch (Exception ex)
         {
-            // 记录失败日志（SaveAsync 自动异步批量写入）
+            // 记录失败日志
             var errorLog = new DownloadLog
             {
                 FileId = entry.Id,
                 FileName = entry.Name,
                 ProjectId = entry.ProjectId,
-                AccessType = "Direct",
+                AccessType = accessType,
                 ClientIp = clientIp,
                 UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
                 Success = false,

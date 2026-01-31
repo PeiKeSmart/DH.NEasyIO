@@ -156,22 +156,26 @@ openssl rand -base64 32
 
 **请求：**
 ```
-PUT /api/v1/io/test.jpg?category=avatar&isPublic=true
-Body: [binary data]
+PUT /api/v1/io
+Content-Type: multipart/form-data
+Body: file=test.jpg（文件对象）, remark=用户头像, category=avatar, accessLevel=1
 ```
 
 **签名字符串：**
 ```
 PUT
-/api/v1/io/test.jpg
-category=avatar&isPublic=true
-[binary data]
+/api/v1/io
+
+[文件MD5哈希]
 1703001234
 ```
 
+注意：上传文件时，签名的Body部分使用文件的MD5哈希值，而不是整个文件内容。
+
 **计算签名：**
 ```csharp
-var signString = "PUT\n/api/v1/io/test.jpg\ncategory=avatar&isPublic=true\n[body]\n1703001234";
+var fileHash = CalculateMD5(fileBytes);
+var signString = "PUT\n/api/v1/io\n\n" + fileHash + "\n1703001234";
 var signature = HMACSHA256(signString, apiSecret);
 ```
 
@@ -182,19 +186,22 @@ var signature = HMACSHA256(signString, apiSecret);
 #### 方式1：HTTP 请求头（推荐）
 
 ```http
-PUT /api/v1/io/test.jpg HTTP/1.1
+PUT /api/v1/io HTTP/1.1
 Host: api.example.com
 X-Project-Code: myapp
 X-Timestamp: 1703001234
 X-Signature: abc123def456...
-Content-Type: application/octet-stream
+X-External-UserId: user_001
+Content-Type: multipart/form-data
 ```
 
-#### 方式2：URL 查询参数
+#### 方式2：URL 查询参数（部分参数）
 
 ```
-PUT /api/v1/io/test.jpg?projectCode=myapp&timestamp=1703001234&signature=abc123...
+PUT /api/v1/io?projectCode=myapp&timestamp=1703001234&signature=abc123...
 ```
+
+注意：X-External-UserId 必须通过请求头传递。
 
 ---
 
@@ -202,7 +209,7 @@ PUT /api/v1/io/test.jpg?projectCode=myapp&timestamp=1703001234&signature=abc123.
 
 ### 4.1 上传文件
 
-**接口地址：** `PUT /api/v1/io/{filename}`
+**接口地址：** `PUT /api/v1/io`
 
 **请求方法：** PUT
 
@@ -212,16 +219,19 @@ PUT /api/v1/io/test.jpg?projectCode=myapp&timestamp=1703001234&signature=abc123.
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |------|------|------|------|------|
-| filename | Path | String | 是 | 文件名（可含路径如：images/avatar.jpg） |
-| category | Query | String | 否 | 文件分类（如：avatar、document） |
-| businessType | Query | String | 否 | 业务类型（如：order、user） |
-| businessId | Query | String | 否 | 业务ID（如：订单号、用户ID） |
-| isPublic | Query | Boolean | 否 | 是否公开（默认false） |
-| projectCode | Header/Query | String | 是 | 项目编码 |
-| timestamp | Header/Query | String | 是 | Unix时间戳（秒） |
-| signature | Header/Query | String | 是 | HMAC签名 |
+| file | Form | IFormFile | 是 | 上传的文件对象 |
+| remark | Form | String | 是 | 备注说明 |
+| category | Form | String | 否 | 文件分类（如：avatar、document） |
+| businessType | Form | String | 否 | 业务类型（如：order、user） |
+| businessId | Form | String | 否 | 业务ID（如：订单号、用户ID） |
+| accessLevel | Form | Int32 | 否 | 访问级别（0=使用项目默认值,1=Public,2=Private,3=Internal） |
+| directory | Form | String | 否 | 指定存储目录（可选） |
+| projectCode | Header | String | 是 | 项目编码 |
+| timestamp | Header | String | 是 | Unix时间戳（秒） |
+| signature | Header | String | 是 | HMAC签名 |
+| X-External-UserId | Header | String | 是 | 外部用户ID |
 
-**请求体：** 文件二进制流
+**请求体：** multipart/form-data
 
 **响应示例（成功）：**
 
@@ -257,7 +267,7 @@ PUT /api/v1/io/test.jpg?projectCode=myapp&timestamp=1703001234&signature=abc123.
 
 ### 4.2 下载文件
 
-**接口地址：** `GET /api/v1/io/{filename}`
+**接口地址：** `GET /api/v1/io/{id}`
 
 **请求方法：** GET
 
@@ -267,7 +277,8 @@ PUT /api/v1/io/test.jpg?projectCode=myapp&timestamp=1703001234&signature=abc123.
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |------|------|------|------|------|
-| filename | Path | String | 是 | 文件名（相对路径） |
+| id | Path | Int64 | 是 | 文件数据库ID |
+| inline | Query | Boolean | 否 | 是否内联显示（预览，默认false） |
 
 **响应：** 文件二进制流
 
@@ -415,11 +426,17 @@ curl -X PATCH "https://your-api.com/api/v1/io/12345/move" \
 
 ### 4.5 删除文件
 
-**接口地址：** `DELETE /api/v1/io/{filename}`
+**接口地址：** `DELETE /api/v1/io/{id}`
 
 **请求方法：** DELETE
 
 **鉴权要求：** 必需
+
+**请求参数：**
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|------|------|------|------|------|
+| id | Path | Int64 | 是 | 文件数据库ID |
 
 **响应示例：**
 
@@ -427,7 +444,115 @@ curl -X PATCH "https://your-api.com/api/v1/io/12345/move" \
 1  // 成功删除1个文件
 ```
 
-### 4.5 搜索文件
+### 4.6 签名URL访问（私有文件预览/下载）
+
+签名URL是一种临时的、带有安全签名的文件访问地址，适用于私有文件（AccessLevel=2）的预览和下载场景。类似于七牛云、阿里云OSS的私有资源访问方案。
+
+#### 4.6.1 单个文件访问
+
+**接口地址：** `GET /api/v1/io/signed/{fileId}`
+
+**请求方法：** GET
+
+**鉴权要求：** 仅验证签名，不需要API Key
+
+**请求参数：**
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|------|------|------|------|------|
+| fileId | Path | Int64 | 是 | 文件ID |
+| expires | Query | Int64 | 是 | 过期时间戳（Unix秒） |
+| sign | Query | String | 是 | HMAC-SHA256签名 |
+| inline | Query | Boolean | 否 | 是否内联显示（true=预览，false=下载，默认true） |
+
+**签名算法：**
+
+```csharp
+// 签名数据格式：{fileId}:{projectId}:{expires}
+var data = $"{fileId}:{projectId}:{expires}";
+
+// 使用项目ApiSecret计算HMAC-SHA256签名
+using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(projectApiSecret));
+var hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
+var signature = BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
+
+// 构造签名URL
+var signedUrl = $"{baseUrl}/api/v1/io/signed/{fileId}?expires={expires}&sign={signature}&inline=true";
+```
+
+**响应：** 文件二进制流
+
+**响应头：**
+```
+Content-Type: image/jpeg (根据文件类型)
+Content-Disposition: inline; filename="test.jpg" (或 attachment)
+```
+
+**错误响应：**
+```json
+{
+  "code": 401,
+  "message": "签名已过期"
+}
+```
+
+#### 4.6.2 批量生成签名URL
+
+**接口地址：** `POST /api/v1/io/signed-urls`
+
+**请求方法：** POST
+
+**鉴权要求：** 需要API Key（与其他API一致）
+
+**请求体：**
+
+```json
+{
+  "fileIds": [12345, 12346, 12347],
+  "expiresInSeconds": 3600,
+  "baseUrl": "https://api.example.com"
+}
+```
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| fileIds | Int64[] | 是 | 文件ID数组 |
+| expiresInSeconds | Int32 | 否 | 有效期（秒），默认3600（1小时），最大604800（7天） |
+| baseUrl | String | 否 | API基础URL，默认使用当前请求的Host |
+
+**响应示例：**
+
+```json
+{
+  "urls": [
+    {
+      "fileId": 12345,
+      "fileName": "image1.jpg",
+      "url": "https://api.example.com/api/v1/io/signed/12345?expires=1738333200&sign=abc123...",
+      "expiresAt": "2026-01-31T13:00:00Z"
+    },
+    {
+      "fileId": 12346,
+      "fileName": "image2.png",
+      "url": "https://api.example.com/api/v1/io/signed/12346?expires=1738333200&sign=def456...",
+      "expiresAt": "2026-01-31T13:00:00Z"
+    }
+  ],
+  "expiresInSeconds": 3600,
+  "generatedAt": "2026-01-31T12:00:00Z"
+}
+```
+
+**使用场景：**
+- 图片列表批量加载（一次生成所有图片的签名URL）
+- 视频播放长效URL（设置较长的过期时间）
+- 临时文件分享（设置较短的过期时间）
+
+**完整示例请参考**: [私有文件签名访问指南](./私有文件签名访问指南.md)
+
+### 4.7 搜索文件
 
 **接口地址：** `GET /api/v1/io/search`
 
