@@ -446,7 +446,8 @@ public class IOController : ApiControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(Int64 id, Boolean inline = false)
     {
-        if (id <= 0) throw new Exception("无效的文件ID");
+        if (id <= 0)
+            return new JsonResult(new { error = "无效的文件ID", fileId = id }) { StatusCode = 400 };
 
         var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
         
@@ -470,14 +471,17 @@ public class IOController : ApiControllerBase
         {
             // 缓存未命中,查询数据库
             entry = FileEntry.FindById(id);
-            if (entry == null) throw new Exception($"文件不存在:{id}");
+            if (entry == null)
+                return new JsonResult(new { error = "文件不存在", fileId = id }) { StatusCode = 404 };
 
             fileProject = FileProject.FindById(entry.ProjectId);
-            if (fileProject == null) throw new Exception("文件所属项目不存在");
+            if (fileProject == null)
+                return new JsonResult(new { error = "文件所属项目不存在", fileId = id }) { StatusCode = 404 };
 
             filePath = GetProjectFilePath(fileProject, entry.RelativePath);
             var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists) throw new Exception("物理文件不存在");
+            if (!fileInfo.Exists)
+                return new JsonResult(new { error = "物理文件不存在", fileId = id }) { StatusCode = 404 };
 
             lastModified = fileInfo.LastWriteTimeUtc;
 
@@ -504,7 +508,7 @@ public class IOController : ApiControllerBase
         if (project != null && entry.ProjectId != project.Id)
         {
             XTrace.WriteLine($"权限拒绝：项目 {project.Id} 尝试访问文件 {entry.Id}（所属项目：{entry.ProjectId}）");
-            return StatusCode(403, new { error = "无权访问此文件", fileId = id });
+            return new JsonResult(new { error = "无权访问此文件", fileId = id }) { StatusCode = 403 };
         }
 
         // 3. 访问级别验证（合并逻辑）
@@ -512,16 +516,16 @@ public class IOController : ApiControllerBase
         if (project == null && effectiveAccessLevel >= 2)
         {
             XTrace.WriteLine($"鉴权失败：文件 {entry.Id} 需要项目鉴权（AccessLevel={effectiveAccessLevel}）");
-            return StatusCode(401, new { 
+            return new JsonResult(new { 
                 error = effectiveAccessLevel == 2 ? "私有文件需要项目鉴权" : "内部文件仅限同项目访问",
                 fileId = id,
                 accessLevel = effectiveAccessLevel
-            });
+            }) { StatusCode = 401 };
         }
         if (effectiveAccessLevel == 3 && project?.Id != entry.ProjectId)
         {
             XTrace.WriteLine($"跨项目访问拒绝：项目 {project?.Id} 尝试访问内部文件 {entry.Id}（所属项目：{entry.ProjectId}）");
-            return StatusCode(403, new { error = "内部文件仅限同项目访问", fileId = id });
+            return new JsonResult(new { error = "内部文件仅限同项目访问", fileId = id }) { StatusCode = 403 };
         }
 
         // 4. HTTP 缓存验证（优化字符串操作）
