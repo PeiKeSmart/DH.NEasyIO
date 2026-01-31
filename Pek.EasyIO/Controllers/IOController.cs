@@ -499,17 +499,30 @@ public class IOController : ApiControllerBase
                 return StatusCode(429, new { error = "请求过于频繁，请稍后再试" });
         }
 
-        // 2. 权限验证
+        // 2. 权限验证（返回 HTTP 状态码，避免异常信息被当作文件内容）
         var project = this.GetCurrentProject();
         if (project != null && entry.ProjectId != project.Id)
-            throw new Exception("无权访问此文件");
+        {
+            XTrace.WriteLine($"权限拒绝：项目 {project.Id} 尝试访问文件 {entry.Id}（所属项目：{entry.ProjectId}）");
+            return StatusCode(403, new { error = "无权访问此文件", fileId = id });
+        }
 
         // 3. 访问级别验证（合并逻辑）
         var effectiveAccessLevel = Math.Max(fileProject.DefaultAccessLevel, entry.AccessLevel);
         if (project == null && effectiveAccessLevel >= 2)
-            throw new Exception(effectiveAccessLevel == 2 ? "私有文件需要项目鉴权" : "内部文件仅限同项目访问");
+        {
+            XTrace.WriteLine($"鉴权失败：文件 {entry.Id} 需要项目鉴权（AccessLevel={effectiveAccessLevel}）");
+            return StatusCode(401, new { 
+                error = effectiveAccessLevel == 2 ? "私有文件需要项目鉴权" : "内部文件仅限同项目访问",
+                fileId = id,
+                accessLevel = effectiveAccessLevel
+            });
+        }
         if (effectiveAccessLevel == 3 && project?.Id != entry.ProjectId)
-            throw new Exception("内部文件仅限同项目访问");
+        {
+            XTrace.WriteLine($"跨项目访问拒绝：项目 {project?.Id} 尝试访问内部文件 {entry.Id}（所属项目：{entry.ProjectId}）");
+            return StatusCode(403, new { error = "内部文件仅限同项目访问", fileId = id });
+        }
 
         // 4. HTTP 缓存验证（优化字符串操作）
         var etag = $"\"{entry.Hash}-{lastModified.Ticks}\"";
