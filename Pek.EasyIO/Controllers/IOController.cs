@@ -588,7 +588,7 @@ public class IOController : ApiControllerBase
             return new JsonResult(new { error = "文件所属项目不存在", fileId = id }) { StatusCode = 404 };
 
         // 3. 验证签名（使用统一的签名算法）
-        var payload = $"{id}:{project.Id}:{expires}";
+        var payload = $"{id}:{project.Code}:{expires}";
         var expectedSign = _signatureValidator.ComputeSignature(payload, project.ApiSecret);
 
         if (sign != expectedSign)
@@ -686,7 +686,7 @@ public class IOController : ApiControllerBase
             }
 
             // 生成签名（使用统一的签名算法）
-            var payload = $"{fileId}:{project.Id}:{expiresAt}";
+            var payload = $"{fileId}:{project.Code}:{expiresAt}";
             var signature = _signatureValidator.ComputeSignature(payload, project.ApiSecret);
 
             var signedUrl = $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}";

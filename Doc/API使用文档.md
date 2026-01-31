@@ -468,8 +468,8 @@ curl -X PATCH "https://your-api.com/api/v1/io/12345/move" \
 **签名算法：**
 
 ```csharp
-// 签名数据格式：{fileId}:{projectId}:{expires}
-var data = $"{fileId}:{projectId}:{expires}";
+// 签名数据格式：{fileId}:{projectCode}:{expires}
+var data = $"{fileId}:{projectCode}:{expires}";
 
 // 使用项目ApiSecret计算HMAC-SHA256签名
 using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(projectApiSecret));
