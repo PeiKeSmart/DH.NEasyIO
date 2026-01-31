@@ -64,7 +64,7 @@ public class EasyIOClient
         if (!String.IsNullOrEmpty(category)) formData.Add(new StringContent(category), "category");
         if (!String.IsNullOrEmpty(businessType)) formData.Add(new StringContent(businessType), "businessType");
         if (!String.IsNullOrEmpty(businessId)) formData.Add(new StringContent(businessId), "businessId");
-        formData.Add(new StringContent(isPublic.ToString().ToLower()), "isPublic");
+        if (accessLevel > 0) formData.Add(new StringContent(accessLevel.ToString()), "accessLevel");
 
         // 5. 生成签名（使用文件哈希）
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
