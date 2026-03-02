@@ -51,13 +51,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="DH.NCore" Version="4.18.2026.220-beta0135" />
+    <PackageReference Include="DH.NCore" Version="4.18.2026.228-beta1303" />
     <PackageReference Include="DH.NStardust.Extensions" Version="4.18.2026.225-beta1147" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.103">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Pek.AspNetCore" Version="4.18.2026.210" />
+    <PackageReference Include="Pek.AspNetCore" Version="4.18.2026.302-beta0038" />
     <PackageReference Include="Pek.NCubeUI" Version="4.16.2026.225-beta1057" />
   </ItemGroup>
 
