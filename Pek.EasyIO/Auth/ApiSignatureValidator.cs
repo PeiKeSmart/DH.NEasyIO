@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Net.Http;
 
 using HlktechFileStorage.Entity;
 
@@ -112,12 +113,22 @@ public class ApiSignatureValidator
         }
         else if (request.ContentLength > 0)
         {
-            // 对于其他请求（JSON 等），使用完整请求体
-            request.EnableBuffering();
-            using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
-            var body = await reader.ReadToEndAsync();
-            request.Body.Position = 0;
-            bodyHash = body ?? "";
+            // 对于表单请求，ActionFilter 执行时模型绑定可能已消费 Body，改为从 Request.Form 规范化重建正文
+            if (request.HasFormContentType)
+            {
+                bodyHash = BuildFormBody(request.Form);
+            }
+            else
+            {
+                // 对于 JSON 等其他请求，使用完整请求体
+                request.EnableBuffering();
+                if (request.Body.CanSeek) request.Body.Position = 0;
+
+                using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+                var body = await reader.ReadToEndAsync();
+                if (request.Body.CanSeek) request.Body.Position = 0;
+                bodyHash = body ?? "";
+            }
         }
 
         // 5. 生成签名字符串
@@ -185,6 +196,34 @@ public class ApiSignatureValidator
         var pairs = query.Split('&', StringSplitOptions.RemoveEmptyEntries);
         Array.Sort(pairs);
         return String.Join("&", pairs);
+    }
+
+    /// <summary>构建规范化的表单正文</summary>
+    /// <param name="form">表单集合</param>
+    /// <returns>规范化后的表单正文</returns>
+    private String BuildFormBody(IFormCollection form)
+    {
+        if (form == null || form.Count == 0) return "";
+
+        var fields = new List<KeyValuePair<String, String>>();
+        foreach (var item in form.OrderBy(e => e.Key, StringComparer.Ordinal))
+        {
+            var values = item.Value.ToArray();
+            if (values.Length == 0)
+            {
+                fields.Add(new KeyValuePair<String, String>(item.Key, ""));
+                continue;
+            }
+
+            Array.Sort(values, StringComparer.Ordinal);
+            foreach (var value in values)
+            {
+                fields.Add(new KeyValuePair<String, String>(item.Key, value ?? ""));
+            }
+        }
+
+        using var content = new FormUrlEncodedContent(fields);
+        return content.ReadAsStringAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 }
 
