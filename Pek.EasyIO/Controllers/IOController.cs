@@ -29,6 +29,7 @@ public class IOController : ApiControllerBase
     private readonly IRateLimiter _rateLimiter;
     private readonly IMemoryCache _cache;
     private readonly UploadTokenService _tokenService;
+    private readonly DownloadAccessTokenService _downloadAccessTokenService;
     private readonly ApiSignatureValidator _signatureValidator;
 
     /// <summary>实例化文件控制器</summary>
@@ -38,7 +39,49 @@ public class IOController : ApiControllerBase
         _rateLimiter = rateLimiter;
         _cache = cache;
         _tokenService = new UploadTokenService();
+        _downloadAccessTokenService = new DownloadAccessTokenService();
         _signatureValidator = new ApiSignatureValidator();
+    }
+
+    /// <summary>生成下载访问令牌（短时间内可复用于多个文件请求）</summary>
+    /// <param name="expiresInSeconds">有效期（秒），默认300秒，最长3600秒</param>
+    /// <returns></returns>
+    [ApiAuth]
+    [HttpPost("access-token")]
+    public Object GenerateAccessToken([FromForm] Int32 expiresInSeconds = 300)
+    {
+        var result = new DGResult();
+        var project = this.GetCurrentProject();
+        if (project == null)
+            throw new Exception("无法获取项目信息");
+
+        try
+        {
+            var token = _downloadAccessTokenService.GenerateToken(project.Id, expiresInSeconds);
+            var normalizedExpires = expiresInSeconds;
+            if (normalizedExpires <= 0) normalizedExpires = _downloadAccessTokenService.DefaultExpiresInSeconds;
+            if (normalizedExpires > _downloadAccessTokenService.MaxExpiresInSeconds) normalizedExpires = _downloadAccessTokenService.MaxExpiresInSeconds;
+
+            var expiresAt = DateTimeOffset.UtcNow.AddSeconds(normalizedExpires);
+            result.Code = StateCode.Ok;
+            result.Message = "下载访问令牌生成成功";
+            result.Data = new
+            {
+                accessToken = token,
+                expiresIn = normalizedExpires,
+                expiresAt = expiresAt.ToString("o"),
+                directUrlTemplate = "/api/v1/io/{id}?accessToken={token}&inline=true"
+            };
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+            result.Code = StateCode.Error;
+            result.ErrCode = 50000;
+            result.Message = $"生成下载访问令牌失败：{ex.Message}";
+        }
+
+        return result;
     }
 
     /// <summary>获取项目文件的存储路径</summary>
@@ -453,6 +496,10 @@ public class IOController : ApiControllerBase
             return new JsonResult(new { error = "无效的文件ID", fileId = id }) { StatusCode = 400 };
 
         var clientIp = DHWeb.GetUserHost(HttpContext) ?? "unknown";
+        var accessProject = default(FileProject);
+        var hasAccessToken = TryResolveProjectFromAccessToken(Request, out accessProject);
+        if (hasAccessToken && accessProject == null)
+            return new JsonResult(new { error = "访问令牌无效或已过期", fileId = id }) { StatusCode = 401 };
         
         // 调试日志：输出 inline 参数值
         XTrace.WriteLine($"文件访问：ID={id}, inline={inline}, ClientIP={clientIp}");
@@ -507,7 +554,7 @@ public class IOController : ApiControllerBase
         }
 
         // 2. 权限验证（返回 HTTP 状态码，避免异常信息被当作文件内容）
-        var project = this.GetCurrentProject();
+        var project = this.GetCurrentProject() ?? accessProject;
         if (project != null && entry.ProjectId != project.Id)
         {
             XTrace.WriteLine($"权限拒绝：项目 {project.Id} 尝试访问文件 {entry.Id}（所属项目：{entry.ProjectId}）");
@@ -545,7 +592,8 @@ public class IOController : ApiControllerBase
             return StatusCode(304);
 
         // 6. 返回文件内容（复用逻辑）
-        return await ReturnFileContent(entry, fileProject, filePath, lastModified, inline, clientIp, "Direct");
+        var accessType = accessProject != null ? "AccessToken" : "Direct";
+        return await ReturnFileContent(entry, fileProject, filePath, lastModified, inline, clientIp, accessType);
     }
 
     /// <summary>通过签名URL下载文件（用于私有文件的临时访问）</summary>
@@ -802,6 +850,25 @@ public class IOController : ApiControllerBase
 
             throw;
         }
+    }
+
+    private Boolean TryResolveProjectFromAccessToken(HttpRequest request, out FileProject project)
+    {
+        project = null;
+        var accessToken = request.Query["accessToken"].FirstOrDefault();
+        if (accessToken.IsNullOrEmpty()) accessToken = request.Headers["X-Access-Token"].FirstOrDefault();
+        if (accessToken.IsNullOrEmpty()) return false;
+
+        var principal = _downloadAccessTokenService.ValidateToken(accessToken);
+        if (principal == null) return true;
+
+        var projectId = _downloadAccessTokenService.GetProjectId(principal);
+        if (!projectId.HasValue) return true;
+
+        project = FileProject.FindById(projectId.Value);
+        if (project == null || !project.Enable) project = null;
+
+        return true;
     }
 
     /// <summary>替换文件内容（保留ID和元数据）</summary>
