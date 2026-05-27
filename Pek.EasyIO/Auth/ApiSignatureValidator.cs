@@ -91,6 +91,8 @@ public class ApiSignatureValidator
             return result;
         }
 
+        XTrace.WriteLine($"[EasyIO服务端验签] Stage=Request, Method={request.Method}, Path={request.Path}, Query={request.QueryString.Value ?? ""}, ProjectCode={projectCode}, Timestamp={timestamp}, Signature={signature}, ContentType={request.ContentType ?? "<null>"}, HasFormContentType={request.HasFormContentType}, ContentLength={(request.ContentLength?.ToString() ?? "<null>")}");
+
         // 4. 读取请求体或文件哈希（用于签名）
         String bodyHash = "";
         
@@ -111,31 +113,33 @@ public class ApiSignatureValidator
                 }
             }
         }
-        else if (request.ContentLength > 0)
+        else if (request.HasFormContentType)
         {
-            // 对于表单请求，ActionFilter 执行时模型绑定可能已消费 Body，改为从 Request.Form 规范化重建正文
-            if (request.HasFormContentType)
-            {
-                bodyHash = BuildFormBody(request.Form);
-            }
-            else
-            {
-                // 对于 JSON 等其他请求，使用完整请求体
-                request.EnableBuffering();
-                if (request.Body.CanSeek) request.Body.Position = 0;
-
-                using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
-                var body = await reader.ReadToEndAsync();
-                if (request.Body.CanSeek) request.Body.Position = 0;
-                bodyHash = body ?? "";
-            }
+            // 对于 application/x-www-form-urlencoded 等表单请求，不依赖 ContentLength，
+            // 某些客户端/协议版本下可能不会显式带长度头，但 Request.Form 仍可正常解析。
+            bodyHash = BuildFormBody(request.Form);
         }
+        else
+        {
+            // 对于 JSON 等其他请求，使用完整请求体
+            request.EnableBuffering();
+            if (request.Body.CanSeek) request.Body.Position = 0;
+
+            using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+            var body = await reader.ReadToEndAsync();
+            if (request.Body.CanSeek) request.Body.Position = 0;
+            bodyHash = body ?? "";
+        }
+
+        XTrace.WriteLine($"[EasyIO服务端验签] Stage=Body, Body={bodyHash}");
 
         // 5. 生成签名字符串
         var signString = BuildSignString(request.Method, request.Path, request.QueryString.Value, bodyHash, timestamp);
+        XTrace.WriteLine("[EasyIO服务端验签] Stage=SignString\n" + signString);
 
         // 6. 计算期望的签名
         var expectedSignature = ComputeSignature(signString, project.ApiSecret);
+        XTrace.WriteLine($"[EasyIO服务端验签] Stage=Compare, Expected={expectedSignature}, Actual={signature}");
 
         // 7. 比对签名
         if (!signature.Equals(expectedSignature, StringComparison.OrdinalIgnoreCase))
@@ -143,6 +147,7 @@ public class ApiSignatureValidator
             result.Success = false;
             result.Message = "签名验证失败";
             XTrace.WriteLine($"签名验证失败：项目={projectCode}, 期望={expectedSignature}, 实际={signature}");
+            XTrace.WriteLine($"签名上下文：ContentType={request.ContentType ?? "<null>"}, HasFormContentType={request.HasFormContentType}, ContentLength={(request.ContentLength?.ToString() ?? "<null>")}, BodyLength={bodyHash.Length}");
             XTrace.WriteLine($"签名字符串：{signString}");
             return result;
         }
@@ -150,6 +155,7 @@ public class ApiSignatureValidator
         // 8. 验证成功
         result.Success = true;
         result.Project = project;
+        XTrace.WriteLine($"[EasyIO服务端验签] Stage=Result, Success=True, ProjectId={project.Id}, ProjectCode={project.Code}");
         return result;
     }
 
