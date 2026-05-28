@@ -31,6 +31,9 @@ public class IOController : ApiControllerBase
     private readonly UploadTokenService _tokenService;
     private readonly DownloadAccessTokenService _downloadAccessTokenService;
     private readonly ApiSignatureValidator _signatureValidator;
+    private static readonly TimeSpan UploadStatusActiveCacheLifetime = TimeSpan.FromHours(2);
+    private static readonly TimeSpan UploadStatusCompletedCacheLifetime = TimeSpan.FromHours(12);
+    private static readonly TimeSpan UploadStatusFailureCacheLifetime = TimeSpan.FromMinutes(30);
 
     /// <summary>实例化文件控制器</summary>
     public IOController(IRateLimiter rateLimiter, IMemoryCache cache)
@@ -134,6 +137,7 @@ public class IOController : ApiControllerBase
         [FromForm] Int32 expiresInMinutes = 60)
     {
         var result = new DGResult();
+        var normalizedFileHash = fileHash.ToLowerInvariant();
 
         // 验证外部用户ID
         var externalUserId = Request.Headers["X-External-UserId"].ToString();
@@ -191,7 +195,7 @@ public class IOController : ApiControllerBase
             // 生成令牌
             var token = _tokenService.GenerateToken(
                 project.Id,
-                fileHash.ToLower(),
+                normalizedFileHash,
                 fileName,
                 fileSize,
                 externalUserId,
@@ -200,7 +204,7 @@ public class IOController : ApiControllerBase
             var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
 
             // 缓存令牌相关元数据（用于合并时恢复上下文）
-            var tokenMetaKey = $"upload_token_meta_{fileHash.ToLower()}";
+            var tokenMetaKey = $"upload_token_meta_{normalizedFileHash}";
             _cache.Set(tokenMetaKey, new
             {
                 projectId = project.Id,
@@ -213,6 +217,17 @@ public class IOController : ApiControllerBase
                 externalUserId
             }, TimeSpan.FromMinutes(expiresInMinutes + 5)); // 多缓存5分钟容错
 
+            SaveUploadStatusCache(project, normalizedFileHash, cacheEntry =>
+            {
+                cacheEntry.FileName = fileName;
+                cacheEntry.FileSize = fileSize;
+                cacheEntry.TotalChunks = 0;
+                cacheEntry.State = "TokenIssued";
+                cacheEntry.RecommendedAction = "StartUpload";
+                cacheEntry.NextAction = ResolveNextAction("StartUpload");
+                cacheEntry.ErrorMessage = null;
+            }, TimeSpan.FromMinutes(Math.Max(expiresInMinutes + 5, 15)));
+
             XTrace.WriteLine($"生成上传令牌：项目={project.Name}, 文件={fileName}, 哈希={fileHash}, 用户={externalUserId}, 替换模式={replaceFileId > 0}");
 
             result.Code = StateCode.Ok;
@@ -222,9 +237,9 @@ public class IOController : ApiControllerBase
                 UploadToken = token,
                 ChunkUploadUrl = "/api/v1/io/chunk",
                 MergeUrl = "/api/v1/io/chunk/merge",
-                StatusUrl = $"/api/v1/io/chunk/status/{fileHash}",
+                StatusUrl = $"/api/v1/io/chunk/status/{normalizedFileHash}",
                 ExpiresAt = expiresAt,
-                FileHash = fileHash.ToLower(),
+                FileHash = normalizedFileHash,
                 MaxChunkSize = 10 * 1024 * 1024,
                 Message = replaceFileId > 0 
                     ? $"替换模式：将替换文件ID={replaceFileId}，请在前端使用 X-Upload-Token 请求头传递令牌" 
@@ -1683,6 +1698,8 @@ public class IOController : ApiControllerBase
             return result;
         }
 
+        fileHash = fileHash.ToLowerInvariant();
+
         // 验证文件总大小
         if (project.MaxFileSize > 0 && fileSize > project.MaxFileSize)
         {
@@ -1723,8 +1740,22 @@ public class IOController : ApiControllerBase
             XTrace.WriteLine($"分片上传成功：{fileHash} - 第 {chunkIndex + 1}/{totalChunks} 片（{file.Length.ToGMK()}）");
 
             // 检查是否所有分片都已上传
-            var uploadedChunks = Directory.GetFiles(chunkDir, "*.tmp").Length;
+            var uploadedChunkIndexes = GetUploadedChunkIndexes(chunkDir);
+            var uploadedChunks = uploadedChunkIndexes.Length;
             var isComplete = uploadedChunks == totalChunks;
+
+            SaveUploadStatusCache(project, fileHash, cacheEntry =>
+            {
+                cacheEntry.FileName = fileName;
+                cacheEntry.FileSize = fileSize;
+                cacheEntry.TotalChunks = totalChunks;
+                cacheEntry.UploadStartTime ??= DateTime.Now;
+                cacheEntry.UploadedChunks = uploadedChunkIndexes;
+                cacheEntry.State = isComplete ? "PendingMerge" : "Uploading";
+                cacheEntry.RecommendedAction = isComplete ? "MergeChunks" : "ResumeUpload";
+                cacheEntry.NextAction = ResolveNextAction(cacheEntry.RecommendedAction);
+                cacheEntry.ErrorMessage = null;
+            }, UploadStatusActiveCacheLifetime);
 
             result.Code = StateCode.Ok;
             result.Message = "分片上传成功";
@@ -1838,6 +1869,8 @@ public class IOController : ApiControllerBase
             result.Message = "文件哈希无效";
             return result;
         }
+
+        fileHash = fileHash.ToLowerInvariant();
 
         if (fileName.IsNullOrEmpty())
         {
@@ -2095,6 +2128,24 @@ public class IOController : ApiControllerBase
             var operationType = replaceFileId > 0 ? "替换" : "合并";
             XTrace.WriteLine($"分片文件{operationType}成功：{entry.Id} - {entry.Name} ({entry.Size.ToGMK()}，共 {totalChunks} 片)");
 
+            SaveUploadStatusCache(project, fileHash, cacheEntry =>
+            {
+                cacheEntry.FileName = fileName;
+                cacheEntry.FileSize = entry.Size;
+                cacheEntry.TotalChunks = totalChunks;
+                cacheEntry.UploadedChunks = totalChunks > 0 ? Enumerable.Range(0, totalChunks).ToArray() : [];
+                cacheEntry.State = "Completed";
+                cacheEntry.RecommendedAction = "SkipUpload";
+                cacheEntry.NextAction = ResolveNextAction(cacheEntry.RecommendedAction);
+                cacheEntry.FinalFileId = entry.Id;
+                cacheEntry.FinalFileName = entry.Name;
+                cacheEntry.FinalOriginalName = entry.OriginalName;
+                cacheEntry.FinalFileSize = entry.Size;
+                cacheEntry.FinalRelativePath = entry.RelativePath;
+                cacheEntry.FinalFileExists = true;
+                cacheEntry.ErrorMessage = null;
+            }, UploadStatusCompletedCacheLifetime);
+
             result.Code = StateCode.Ok;
             result.Message = replaceFileId > 0 ? "文件替换成功" : "文件合并成功";
             result.Data = new
@@ -2132,6 +2183,20 @@ public class IOController : ApiControllerBase
             result.Code = StateCode.Error;
             result.ErrCode = 50000;
             result.Message = $"文件合并失败：{ex.Message}";
+
+            var chunkDir = Path.Combine(project.StoragePath, "Temp", "Chunks", fileHash);
+            var uploadedChunkIndexes = Directory.Exists(chunkDir) ? GetUploadedChunkIndexes(chunkDir) : [];
+            var isChunkComplete = totalChunks > 0 && uploadedChunkIndexes.Length == totalChunks;
+            SaveUploadStatusCache(project, fileHash, cacheEntry =>
+            {
+                cacheEntry.FileName = fileName;
+                cacheEntry.TotalChunks = totalChunks;
+                cacheEntry.UploadedChunks = uploadedChunkIndexes;
+                cacheEntry.State = isChunkComplete ? "PendingMerge" : "MergeFailed";
+                cacheEntry.RecommendedAction = isChunkComplete ? "MergeChunks" : "Reupload";
+                cacheEntry.NextAction = ResolveNextAction(cacheEntry.RecommendedAction);
+                cacheEntry.ErrorMessage = ex.Message;
+            }, UploadStatusFailureCacheLifetime);
         }
         finally
         {
@@ -2168,35 +2233,18 @@ public class IOController : ApiControllerBase
         if (project == null)
             throw new Exception("无法获取项目信息");
 
-        // 令牌模式：允许查询任意fileHash状态（支持断点续传）
-        // 注意：GetChunkStatus 不验证令牌fileHash，因为：
-        // 1. 令牌可能已过期但分片仍在
-        // 2. 前端需要查询状态决定是否续传
-        // 3. 状态查询不涉及敏感操作，仅返回已上传分片索引
-        var authMode = HttpContext.Items["AuthMode"]?.ToString();
+        // 令牌模式允许查询任意 fileHash 的状态，用于断点续传和失败恢复。
+        // 这里不把 token 内的 fileHash 强绑定到查询参数，避免：
+        // 1. 令牌过期后，仍存在的分片状态无法查询
+        // 2. 前端无法判断当前应继续上传、触发合并还是直接重传
+        // 3. 状态查询只读取分片和最终文件状态，不执行敏感写操作
+
+        fileHash = fileHash.ToLowerInvariant();
 
         try
         {
             var chunkDir = Path.Combine(project.StoragePath, "Temp", "Chunks", fileHash);
-            if (!Directory.Exists(chunkDir))
-            {
-                result.Code = StateCode.Ok;
-                result.Message = "未找到分片记录";
-                result.Data = new
-                {
-                    fileHash,
-                    exists = false,
-                    uploadedChunks = new Int32[0],
-                    uploadedCount = 0
-                };
-                return result;
-            }
-
-            // 获取已上传的分片索引
-            var uploadedChunks = Directory.GetFiles(chunkDir, "*.tmp")
-                .Select(f => Int32.Parse(Path.GetFileNameWithoutExtension(f)))
-                .OrderBy(x => x)
-                .ToArray();
+            var uploadedChunks = Directory.Exists(chunkDir) ? GetUploadedChunkIndexes(chunkDir) : [];
 
             // 读取第一个分片的元数据（获取总分片数等信息）
             String fileName = null;
@@ -2204,7 +2252,7 @@ public class IOController : ApiControllerBase
             Int32 totalChunks = 0;
             DateTime? uploadStartTime = null;
 
-            var firstMetaFile = Directory.GetFiles(chunkDir, "*.meta").FirstOrDefault();
+            var firstMetaFile = Directory.Exists(chunkDir) ? Directory.GetFiles(chunkDir, "*.meta").FirstOrDefault() : null;
             if (!firstMetaFile.IsNullOrEmpty())
             {
                 try
@@ -2230,21 +2278,7 @@ public class IOController : ApiControllerBase
 
             result.Code = StateCode.Ok;
             result.Message = "查询成功";
-            result.Data = new
-            {
-                fileHash,
-                exists = true,
-                fileName,
-                fileSize,
-                totalChunks,
-                uploadedChunks,
-                uploadedCount = uploadedChunks.Length,
-                isComplete = totalChunks > 0 && uploadedChunks.Length == totalChunks,
-                uploadStartTime,
-                missingChunks = totalChunks > 0
-                    ? Enumerable.Range(0, totalChunks).Except(uploadedChunks).ToArray()
-                    : new Int32[0]
-            };
+            result.Data = BuildChunkUploadStatus(project, fileHash, fileName, fileSize, totalChunks, uploadStartTime, uploadedChunks);
         }
         catch (Exception ex)
         {
@@ -2294,6 +2328,8 @@ public class IOController : ApiControllerBase
                     // 检查最后修改时间
                     if (dirInfo.LastWriteTime < expireTime)
                     {
+                        var fileHash = Path.GetFileName(hashDir)?.ToLowerInvariant();
+
                         // 计算目录大小
                         var dirSize = dirInfo.GetFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
                         totalSize += dirSize;
@@ -2301,6 +2337,18 @@ public class IOController : ApiControllerBase
                         // 删除整个目录
                         Directory.Delete(hashDir, true);
                         cleanedCount++;
+
+                        if (!fileHash.IsNullOrEmpty())
+                        {
+                            SaveUploadStatusCache(project, fileHash, cacheEntry =>
+                            {
+                                cacheEntry.UploadedChunks = [];
+                                cacheEntry.State = "Expired";
+                                cacheEntry.RecommendedAction = "Reupload";
+                                cacheEntry.NextAction = ResolveNextAction(cacheEntry.RecommendedAction);
+                                cacheEntry.ErrorMessage = "分片目录已过期并清理";
+                            }, UploadStatusFailureCacheLifetime);
+                        }
 
                         XTrace.WriteLine($"清理过期分片目录：{hashDir}（{dirSize.ToGMK()}）");
                     }
@@ -2358,6 +2406,162 @@ public class IOController : ApiControllerBase
         }
 
         return true;
+    }
+
+    private Int32[] GetUploadedChunkIndexes(String chunkDir)
+    {
+        return Directory.GetFiles(chunkDir, "*.tmp")
+            .Select(f => Int32.Parse(Path.GetFileNameWithoutExtension(f)))
+            .OrderBy(x => x)
+            .ToArray();
+    }
+
+    private Object BuildChunkUploadStatus(FileProject project, String fileHash, String fileName, Int64 fileSize, Int32 totalChunks, DateTime? uploadStartTime, Int32[] uploadedChunks)
+    {
+        var cacheEntry = GetUploadStatusCache(project, fileHash);
+
+        if (fileName.IsNullOrEmpty()) fileName = cacheEntry?.FileName;
+        if (fileSize <= 0) fileSize = cacheEntry?.FileSize ?? 0;
+        if (totalChunks <= 0) totalChunks = cacheEntry?.TotalChunks ?? 0;
+        uploadStartTime ??= cacheEntry?.UploadStartTime;
+        uploadedChunks ??= [];
+
+        var uploadedCount = uploadedChunks.Length;
+        var hasChunkState = totalChunks > 0 || uploadedCount > 0 || !fileName.IsNullOrEmpty();
+        var isChunkComplete = hasChunkState && totalChunks > 0 && uploadedCount == totalChunks;
+        var missingChunks = totalChunks > 0
+            ? Enumerable.Range(0, totalChunks).Except(uploadedChunks).ToArray()
+            : [];
+
+        var finalEntry = FileEntry.FindAll(FileEntry._.Hash == fileHash)
+            .Where(e => e.ProjectId == project.Id)
+            .OrderByDescending(e => e.Id)
+            .FirstOrDefault();
+
+        var finalFilePath = default(String);
+        var finalFileExists = false;
+        if (finalEntry != null)
+        {
+            finalFilePath = GetProjectFilePath(project, finalEntry.RelativePath);
+            finalFileExists = System.IO.File.Exists(finalFilePath);
+        }
+
+        var state = ResolveUploadState(finalEntry, finalFileExists, isChunkComplete, uploadedCount, cacheEntry);
+        var recommendedAction = ResolveRecommendedAction(finalEntry, finalFileExists, isChunkComplete, uploadedCount, cacheEntry);
+
+        if (finalEntry != null && finalFileExists)
+        {
+            SaveUploadStatusCache(project, fileHash, entry =>
+            {
+                entry.FileName = finalEntry.OriginalName;
+                entry.FileSize = finalEntry.Size;
+                entry.TotalChunks = totalChunks;
+                entry.State = "Completed";
+                entry.RecommendedAction = "SkipUpload";
+                entry.NextAction = ResolveNextAction(entry.RecommendedAction);
+                entry.FinalFileId = finalEntry.Id;
+                entry.FinalFileName = finalEntry.Name;
+                entry.FinalOriginalName = finalEntry.OriginalName;
+                entry.FinalFileSize = finalEntry.Size;
+                entry.FinalRelativePath = finalEntry.RelativePath;
+                entry.FinalFileExists = true;
+                entry.ErrorMessage = null;
+            }, UploadStatusCompletedCacheLifetime);
+        }
+
+        return new
+        {
+            fileHash,
+            exists = hasChunkState,
+            hasChunkState,
+            tokenIssued = cacheEntry?.State == "TokenIssued",
+            fileName,
+            fileSize,
+            totalChunks,
+            uploadedChunks,
+            uploadedCount,
+            isComplete = isChunkComplete,
+            uploadStartTime,
+            missingChunks,
+            state,
+            recommendedAction,
+            nextAction = ResolveNextAction(recommendedAction),
+            cachedState = cacheEntry?.State,
+            statusUpdatedAt = cacheEntry?.UpdatedAt,
+            lastError = cacheEntry?.ErrorMessage,
+            canSkipUpload = finalEntry != null && finalFileExists,
+            shouldMerge = finalEntry == null && isChunkComplete,
+            shouldUpload = finalEntry == null && !isChunkComplete,
+            shouldRetry = finalEntry == null && !hasChunkState,
+            finalFile = finalEntry == null ? null : new
+            {
+                id = finalEntry.Id,
+                name = finalEntry.Name,
+                originalName = finalEntry.OriginalName,
+                length = finalEntry.Size,
+                hash = finalEntry.Hash,
+                relativePath = finalEntry.RelativePath,
+                createTime = finalEntry.CreateTime,
+                updateTime = finalEntry.UpdateTime,
+                existsInStorage = finalFileExists,
+                fullPath = finalFilePath
+            }
+        };
+    }
+
+    private UploadStatusCacheEntry GetUploadStatusCache(FileProject project, String fileHash)
+    {
+        _cache.TryGetValue(GetUploadStatusCacheKey(project.Id, fileHash), out UploadStatusCacheEntry cacheEntry);
+        return cacheEntry ?? new UploadStatusCacheEntry
+        {
+            ProjectId = project.Id,
+            FileHash = fileHash
+        };
+    }
+
+    private void SaveUploadStatusCache(FileProject project, String fileHash, Action<UploadStatusCacheEntry> updateAction, TimeSpan lifetime)
+    {
+        var cacheEntry = GetUploadStatusCache(project, fileHash);
+
+        updateAction(cacheEntry);
+        cacheEntry.ProjectId = project.Id;
+        cacheEntry.FileHash = fileHash;
+        cacheEntry.UpdatedAt = DateTime.Now;
+        _cache.Set(GetUploadStatusCacheKey(project.Id, fileHash), cacheEntry, lifetime);
+    }
+
+    private static String GetUploadStatusCacheKey(Int64 projectId, String fileHash) => $"upload_status_{projectId}_{fileHash}";
+
+    private static String ResolveUploadState(FileEntry finalEntry, Boolean finalFileExists, Boolean isChunkComplete, Int32 uploadedCount, UploadStatusCacheEntry cacheEntry)
+    {
+        if (finalEntry != null && finalFileExists) return "Completed";
+        if (finalEntry != null) return "RecordOnly";
+        if (isChunkComplete) return "PendingMerge";
+        if (uploadedCount > 0) return "Uploading";
+        if (!cacheEntry?.State.IsNullOrEmpty() ?? false) return cacheEntry.State;
+        return "NotFound";
+    }
+
+    private static String ResolveRecommendedAction(FileEntry finalEntry, Boolean finalFileExists, Boolean isChunkComplete, Int32 uploadedCount, UploadStatusCacheEntry cacheEntry)
+    {
+        if (finalEntry != null && finalFileExists) return "SkipUpload";
+        if (finalEntry != null) return "Reupload";
+        if (isChunkComplete) return "MergeChunks";
+        if (uploadedCount > 0) return "ResumeUpload";
+        if (!cacheEntry?.RecommendedAction.IsNullOrEmpty() ?? false) return cacheEntry.RecommendedAction;
+        return "StartUpload";
+    }
+
+    private static String ResolveNextAction(String recommendedAction)
+    {
+        return recommendedAction switch
+        {
+            "SkipUpload" => "ReuseExisting",
+            "ResumeUpload" => "ContinueUpload",
+            "MergeChunks" => "MergeNow",
+            "Reupload" => "RestartUpload",
+            _ => "StartUpload"
+        };
     }
 
     private String GetContentType(String ext)
@@ -2523,4 +2727,26 @@ public class IOController : ApiControllerBase
     }
 
     #endregion
+}
+
+sealed class UploadStatusCacheEntry
+{
+    public Int64 ProjectId { get; set; }
+    public String FileHash { get; set; } = String.Empty;
+    public String FileName { get; set; } = String.Empty;
+    public Int64 FileSize { get; set; }
+    public Int32 TotalChunks { get; set; }
+    public DateTime? UploadStartTime { get; set; }
+    public Int32[] UploadedChunks { get; set; } = [];
+    public String State { get; set; } = String.Empty;
+    public String RecommendedAction { get; set; } = String.Empty;
+    public String NextAction { get; set; } = String.Empty;
+    public DateTime UpdatedAt { get; set; }
+    public String ErrorMessage { get; set; } = String.Empty;
+    public Int64 FinalFileId { get; set; }
+    public String FinalFileName { get; set; } = String.Empty;
+    public String FinalOriginalName { get; set; } = String.Empty;
+    public Int64 FinalFileSize { get; set; }
+    public String FinalRelativePath { get; set; } = String.Empty;
+    public Boolean FinalFileExists { get; set; }
 }
