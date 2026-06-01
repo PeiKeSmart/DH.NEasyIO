@@ -105,6 +105,33 @@ public class IOController : ApiControllerBase
         return Path.Combine(storageRoot, relativePath).GetFullPath();
     }
 
+    /// <summary>获取用于URL路径段展示的文件名</summary>
+    /// <param name="fileName">原始文件名</param>
+    /// <returns></returns>
+    private static String GetFriendlyFileNameSegment(String fileName)
+    {
+        var safeFileName = Path.GetFileName(fileName);
+        if (safeFileName.IsNullOrEmpty()) return String.Empty;
+
+        return Uri.EscapeDataString(safeFileName);
+    }
+
+    /// <summary>设置文件下载响应头</summary>
+    /// <param name="inline">是否内联预览</param>
+    /// <param name="fileName">文件名</param>
+    private void SetContentDisposition(Boolean inline, String fileName)
+    {
+        var safeFileName = Path.GetFileName(fileName);
+        if (safeFileName.IsNullOrEmpty()) safeFileName = "download";
+
+        var fallbackFileName = System.Text.RegularExpressions.Regex.Replace(safeFileName, @"[^\u0020-\u007E]", "_");
+        fallbackFileName = fallbackFileName.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        var utf8FileName = Uri.EscapeDataString(safeFileName);
+
+        Response.Headers["Content-Disposition"] =
+            $"{(inline ? "inline" : "attachment")}; filename=\"{fallbackFileName}\"; filename*=UTF-8''{utf8FileName}";
+    }
+
     /// <summary>生成上传令牌（业务系统调用，用于前端直传）</summary>
     /// <remarks>
     /// 支持两种模式：
@@ -618,8 +645,10 @@ public class IOController : ApiControllerBase
     /// <param name="sign">HMAC签名</param>
     /// <returns></returns>
     [HttpGet("signed/{id}")]
+    [HttpGet("signed/{id}/{fileName}")]
     public async Task<IActionResult> GetSigned(
         Int64 id,
+        String fileName = null,
         Boolean inline = false,
         Int64 expires = 0,
         String sign = null)
@@ -752,7 +781,13 @@ public class IOController : ApiControllerBase
             var payload = $"{fileId}:{project.Code}:{expiresAt}";
             var signature = _signatureValidator.ComputeSignature(payload, project.ApiSecret);
 
-            var signedUrl = $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}";
+            var friendlyFileName = GetFriendlyFileNameSegment(entry.OriginalName);
+            var signedUrl = friendlyFileName.IsNullOrEmpty()
+                ? $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}"
+                : $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}/{friendlyFileName}?expires={expiresAt}&sign={signature}";
+            var previewUrl = friendlyFileName.IsNullOrEmpty()
+                ? $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}&inline=true"
+                : $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}/{friendlyFileName}?expires={expiresAt}&sign={signature}&inline=true";
 
             urls.Add(new
             {
@@ -761,7 +796,7 @@ public class IOController : ApiControllerBase
                 size = entry.Size,
                 contentType = entry.ContentType,
                 url = signedUrl,
-                previewUrl = $"{effectiveBaseUrl}/api/v1/io/signed/{fileId}?expires={expiresAt}&sign={signature}&inline=true",
+                previewUrl,
                 expiresIn = expiresInSeconds,
                 expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiresAt).ToString("o")
             });
@@ -804,8 +839,7 @@ public class IOController : ApiControllerBase
         var contentType = entry.ContentType ?? "application/octet-stream";
         var downloadFileName = entry.OriginalName.IsNullOrEmpty() ? entry.Name : entry.OriginalName;
 
-        Response.Headers.Append("Content-Disposition",
-            $"{(inline ? "inline" : "attachment")}; filename=\"{Uri.EscapeDataString(downloadFileName)}\"");
+        SetContentDisposition(inline, downloadFileName);
         Response.Headers.Append("ETag", etag);
         Response.Headers.Append("Last-Modified", lastModified.ToString("R"));
         Response.Headers.Append("Cache-Control",
